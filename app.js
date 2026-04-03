@@ -47,7 +47,12 @@ function debounce(fn, ms) {
 }
 
 // ── Initialize ──
-document.addEventListener('DOMContentLoaded', () => {
+// Terminal init is deferred until auth completes (auth.js calls showTerminal).
+let _terminalInitialized = false;
+
+function initTerminal() {
+  if (_terminalInitialized) return;
+  _terminalInitialized = true;
   loadExchangeMap();
   initSearch();
   initTabs();
@@ -56,6 +61,16 @@ document.addEventListener('DOMContentLoaded', () => {
   initArticleModal();
   loadSymbol(state.currentSymbol);
   renderTickerTape();
+}
+
+// Legacy fallback: if auth.js is not loaded or Supabase is unconfigured,
+// init after a short delay so the terminal still works in dev mode.
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    if (!_terminalInitialized && document.getElementById('app').style.display !== 'none') {
+      initTerminal();
+    }
+  }, 500);
 });
 
 
