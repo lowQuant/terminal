@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Bloomberg-inspired stock terminal with real-time TradingView data, technical analysis, and company fundamentals.">
+  <title>Terminal — Stock Analysis Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Favicon: orange square -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='12' fill='%23ff8c00'/><text y='72' x='18' font-size='60' font-family='monospace' font-weight='bold' fill='%230a0a0f'>T</text></svg>">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ══════════ HEADER BAR ══════════ -->
+  <header class="header" id="header">
+    <div class="header__brand">
+      <div class="header__logo">T</div>
+      <div>
+        <div class="header__title">TERMINAL</div>
+        <div class="header__subtitle">Stock Analysis</div>
+      </div>
+    </div>
+
+    <!-- Ticker Search -->
+    <div class="search-container">
+      <span class="search-container__icon">⌕</span>
+      <input
+        type="text"
+        id="ticker-input"
+        class="search-container__input"
+      placeholder="Search company or ticker... (e.g. Toyota, AAPL)"
+        autocomplete="off"
+        spellcheck="false"
+      >
+      <span class="search-container__hint">
+        <span class="kbd">/</span> to search
+      </span>
+
+      <!-- Recent / Suggestions Dropdown -->
+      <div class="recent-dropdown" id="recent-dropdown"></div>
+    </div>
+
+    <!-- Header Info -->
+    <div class="header__info">
+      <div class="live-dot"></div>
+      <span class="header__clock" id="header-clock">--:--:--</span>
+    </div>
+  </header>
+
+  <!-- ══════════ TICKER TAPE ══════════ -->
+  <div class="ticker-tape-bar" id="ticker-tape"></div>
+
+  <!-- ══════════ ACTIVE SYMBOL BAR ══════════ -->
+  <div class="symbol-bar" id="symbol-bar">
+    <span class="symbol-bar__ticker" id="symbol-ticker">AAPL</span>
+    <span class="symbol-bar__name" id="symbol-name">Apple Inc.</span>
+    <span class="symbol-bar__divider"></span>
+    <span class="text-muted" style="font-size: 11px;" id="symbol-exchange">NASDAQ</span>
+  </div>
+
+  <!-- ══════════ NAV TABS ══════════ -->
+  <nav class="nav-tabs" id="nav-tabs">
+    <button class="nav-tabs__tab nav-tabs__tab--active" data-tab="overview">
+      <span class="kbd" style="margin-right:4px">1</span> Overview
+    </button>
+    <button class="nav-tabs__tab" data-tab="chart">
+      <span class="kbd" style="margin-right:4px">2</span> Chart
+    </button>
+    <button class="nav-tabs__tab" data-tab="news">
+      <span class="kbd" style="margin-right:4px">3</span> News
+    </button>
+    <button class="nav-tabs__tab" data-tab="financials">
+      <span class="kbd" style="margin-right:4px">4</span> Financials
+    </button>
+    <button class="nav-tabs__tab" data-tab="profile">
+      <span class="kbd" style="margin-right:4px">5</span> Profile
+    </button>
+    <button class="nav-tabs__tab" data-tab="watchlist">
+      <span class="kbd" style="margin-right:4px">6</span> Watchlist
+    </button>
+  </nav>
+
+  <!-- ══════════ MAIN DASHBOARD ══════════ -->
+  <main class="dashboard dashboard--overview" id="dashboard">
+    <!-- Content injected by app.js -->
+  </main>
+
+  <!-- ══════════ STATUS BAR ══════════ -->
+  <footer class="status-bar" id="status-bar">
+    <div class="status-bar__left">
+      <span class="status-bar__item" id="status-live">
+        <span class="live-dot" id="status-live-dot"></span>
+        <span id="status-live-label">LIVE</span>
+      </span>
+      <span class="status-bar__separator"></span>
+      <span class="status-bar__item" id="status-symbol">NASDAQ:AAPL</span>
+      <span class="status-bar__separator"></span>
+      <span class="status-bar__item" id="status-date">--</span>
+    </div>
+    <div class="status-bar__right">
+      <span class="status-bar__item text-muted">
+        <span class="kbd">/</span> Search
+      </span>
+      <span class="status-bar__separator"></span>
+      <span class="status-bar__item text-muted">
+        <span class="kbd">1</span>-<span class="kbd">6</span> Tabs
+      </span>
+      <span class="status-bar__separator"></span>
+      <span class="status-bar__item text-muted" id="status-datasource">Data: TradingView</span>
+    </div>
+  </footer>
+
+</div>
+
+<!-- ══════════ ARTICLE READER MODAL ══════════ -->
+<div class="article-modal" id="article-modal">
+  <div class="article-modal__content">
+    <div class="article-modal__header">
+      <div class="article-modal__header-info">
+        <div class="article-modal__title" id="article-modal-title">Article</div>
+        <div class="article-modal__meta">
+          <span class="article-modal__publisher" id="article-modal-publisher"></span>
+          <span>·</span>
+          <span id="article-modal-date"></span>
+        </div>
+      </div>
+      <button class="article-modal__close" onclick="closeArticleModal()" title="Close (Esc)">✕</button>
+    </div>
+    <div class="article-modal__body" id="article-modal-body">
+      <!-- Article content loaded dynamically -->
+    </div>
+    <div class="article-modal__footer">
+      <a href="#" id="article-modal-link" target="_blank" class="article-modal__link">
+        Open original article →
+      </a>
+      <span class="article-modal__esc-hint">
+        <span class="kbd">Esc</span> to close
+      </span>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>

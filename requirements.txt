@@ -1,0 +1,4 @@
+flask>=3.0
+yfinance>=0.2.30
+trafilatura>=1.6
+requests>=2.31
