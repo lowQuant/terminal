@@ -6,15 +6,15 @@
 // ── Supabase Configuration ──
 // Replace these with your Supabase project credentials.
 // Dashboard → Settings → API → Project URL & anon/public key.
-const SUPABASE_URL = 'https://YOUR_PROJECT_ID.supabase.co';
-const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
+const SUPABASE_URL = 'https://dukjbygxuzzofakrajkt.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR1a2pieWd4dXp6b2Zha3Jhamt0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyMzAzMTksImV4cCI6MjA5MDgwNjMxOX0.69Ya9Izi8qn29Ku8FMi_RSsNO-XH4s6ukYPDwPUiYqE';
 
-let supabase;
+let supabaseClient;
 try {
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 } catch (e) {
   console.warn('Supabase client not initialized — running in demo mode.', e);
-  supabase = null;
+  supabaseClient = null;
 }
 
 // ── Auth State ──
@@ -22,6 +22,7 @@ const auth = {
   user: null,
   session: null,
   loading: true,
+  isRegistering: false, // Prevents terminal flash during custom signup flow
 };
 
 // ── DOM References ──
@@ -55,6 +56,31 @@ document.querySelectorAll('[data-auth-tab]').forEach(tab => {
     registerError.textContent = '';
   });
 });
+
+async function processLogin(user) {
+  if (supabaseClient) {
+    const { data: profile } = await supabaseClient
+      .from('profiles')
+      .select('is_active')
+      .eq('id', user.id)
+      .single();
+
+    if (profile && profile.is_active === false) {
+      // Force sign-out if account is deactivated or pending
+      await supabaseClient.auth.signOut();
+      
+      const loginError = document.getElementById('login-error');
+      if (loginError && !auth.isRegistering) {
+        loginError.textContent = 'Account disabled or pending activation. Please verify your email.';
+        loginError.style.color = 'var(--red)';
+      }
+      showWelcome();
+      return; // Do not render terminal
+    }
+  }
+
+  showTerminal(user);
+}
 
 // ── Show / Hide Helpers ──
 function showTerminal(user) {
@@ -109,13 +135,13 @@ loginForm.addEventListener('submit', async (e) => {
 
   setSubmitting(btn, true);
 
-  if (!supabase) {
+  if (!supabaseClient) {
     loginError.textContent = 'Auth service not configured. Please set Supabase credentials in auth.js.';
     setSubmitting(btn, false);
     return;
   }
 
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
 
   setSubmitting(btn, false);
 
@@ -124,7 +150,7 @@ loginForm.addEventListener('submit', async (e) => {
     return;
   }
 
-  showTerminal(data.user);
+  processLogin(data.user);
 });
 
 // ── Email/Password Registration ──
@@ -148,8 +174,9 @@ registerForm.addEventListener('submit', async (e) => {
   }
 
   setSubmitting(btn, true);
+  auth.isRegistering = true;
 
-  if (!supabase) {
+  if (!supabaseClient) {
     registerError.textContent = 'Auth service not configured. Please set Supabase credentials in auth.js.';
     setSubmitting(btn, false);
     return;
@@ -157,7 +184,7 @@ registerForm.addEventListener('submit', async (e) => {
 
   const displayName = [firstName, lastName].filter(Boolean).join(' ') || email.split('@')[0];
 
-  const { data, error } = await supabase.auth.signUp({
+  const { data, error } = await supabaseClient.auth.signUp({
     email,
     password,
     options: {
@@ -176,30 +203,38 @@ registerForm.addEventListener('submit', async (e) => {
     return;
   }
 
-  // Supabase may require email confirmation
+  // Supabase may require email confirmation natively
   if (data.user && !data.user.confirmed_at && data.user.identities?.length === 0) {
     registerError.textContent = 'An account with this email already exists.';
     registerError.style.color = 'var(--red)';
     return;
   }
 
+  // Since you have a custom activation flow and don't want auto-login:
   if (data.session) {
-    showTerminal(data.user);
-  } else {
-    // Email confirmation required
-    registerError.textContent = 'Check your email for a confirmation link.';
-    registerError.style.color = 'var(--green)';
+    // Immediately sign them out so they don't bypass your custom activation
+    await supabaseClient.auth.signOut();
   }
+
+  // Show a success message and keep them on the auth page
+  registerError.textContent = 'Account created successfully! Please follow your custom email instructions to activate.';
+  registerError.style.color = 'var(--green)';
+
+  // Optionally, you can clear the form fields here:
+  document.getElementById('register-form').reset();
+
+  // Reset flag
+  auth.isRegistering = false;
 });
 
 // ── Google OAuth ──
 googleLoginBtn.addEventListener('click', async () => {
-  if (!supabase) {
+  if (!supabaseClient) {
     loginError.textContent = 'Auth service not configured. Please set Supabase credentials in auth.js.';
     return;
   }
 
-  const { error } = await supabase.auth.signInWithOAuth({
+  const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: 'google',
     options: {
       redirectTo: window.location.origin + window.location.pathname,
@@ -213,37 +248,40 @@ googleLoginBtn.addEventListener('click', async () => {
 
 // ── Logout ──
 logoutBtn.addEventListener('click', async () => {
-  if (supabase) {
-    await supabase.auth.signOut();
+  if (supabaseClient) {
+    await supabaseClient.auth.signOut();
   }
   showWelcome();
 });
 
 // ── Session Restoration (on page load & OAuth redirect) ──
 async function initAuth() {
-  if (!supabase) {
+  if (!supabaseClient) {
     auth.loading = false;
     showWelcome();
     return;
   }
 
   // Listen for auth state changes (handles OAuth redirects, token refresh, etc.)
-  supabase.auth.onAuthStateChange((event, session) => {
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    // Prevent terminal flash during custom sign-up flow
+    if (auth.isRegistering) return;
+
     if (session?.user) {
       auth.session = session;
-      showTerminal(session.user);
+      processLogin(session.user);
     } else if (event === 'SIGNED_OUT') {
       showWelcome();
     }
   });
 
   // Check for existing session
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await supabaseClient.auth.getSession();
   auth.loading = false;
 
   if (session?.user) {
-    auth.session = session;
-    showTerminal(session.user);
+      auth.session = session;
+      processLogin(session.user);
   } else {
     showWelcome();
   }
