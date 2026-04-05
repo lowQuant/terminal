@@ -27,6 +27,7 @@ from flask import Blueprint, jsonify, request
 
 from functions._utils import cached
 from functions._tv_scanner import fetch_earnings_calendar
+from functions._countries import region_scanner_slugs
 
 
 evts_bp = Blueprint('evts', __name__)
@@ -35,32 +36,10 @@ evts_bp = Blueprint('evts', __name__)
 # ═════════════════════════════════════════
 # Region configuration
 # ═════════════════════════════════════════
-# Each region maps to one or more TradingView scanner market slugs.
-# ``US`` is special-cased to use the NASDAQ API for truly exhaustive
-# coverage; everything else is scanner-driven.
+# US is special-cased to use NASDAQ's API; all other regions are resolved
+# dynamically via the country registry (region_scanner_slugs).
 
-REGIONS = {
-    'US': {
-        'nasdaq_api': True,
-        'markets':    ['america'],
-    },
-    'EU': {
-        'nasdaq_api': False,
-        'markets':    [
-            'germany', 'france', 'netherlands', 'italy', 'spain',
-            'switzerland', 'belgium', 'denmark', 'sweden', 'finland',
-            'norway', 'uk', 'ireland', 'austria', 'portugal',
-        ],
-    },
-    'JP': {
-        'nasdaq_api': False,
-        'markets':    ['japan'],
-    },
-    'HK': {
-        'nasdaq_api': False,
-        'markets':    ['hongkong'],
-    },
-}
+NASDAQ_REGION = 'US'
 
 
 # ═════════════════════════════════════════
@@ -160,20 +139,21 @@ def earnings_calendar():
         days = 14
     days = max(1, min(days, 45))
     country = (request.args.get('country') or 'US').upper()
+    use_nasdaq = (country == NASDAQ_REGION)
 
-    config = REGIONS.get(country)
-    if not config:
-        return jsonify({'error': f'Unsupported region: {country}'}), 400
+    # Resolve scanner slugs from the country registry. This means any
+    # country added to _countries.py with a tv_scanner slug is instantly
+    # available — no per-function config needed.
+    scanner_slugs = region_scanner_slugs(country)
+    if not use_nasdaq and not scanner_slugs:
+        return jsonify({'error': f'No scanner coverage for: {country}'}), 400
 
     def fetch():
-        if config['nasdaq_api']:
+        if use_nasdaq:
             rows = _fetch_us_earnings(days)
         else:
-            # Single scanner call per market — no per-ticker yfinance.
-            # We fetch ALL stocks (no cap) and let the date-window
-            # filter surface only those actually reporting.
             rows = fetch_earnings_calendar(
-                markets=config['markets'],
+                markets=scanner_slugs,
                 days=days,
             )
         rows.sort(key=lambda r: (r['date'], -(r.get('market_cap') or 0)))
@@ -183,7 +163,7 @@ def earnings_calendar():
         data = cached(f'earnings_{country}_{days}', fetch, ttl=1800)
         return jsonify({
             'rows':    data,
-            'source':  'NASDAQ' if config['nasdaq_api'] else 'TradingView',
+            'source':  'NASDAQ' if use_nasdaq else 'TradingView',
             'country': country,
         })
     except Exception as e:

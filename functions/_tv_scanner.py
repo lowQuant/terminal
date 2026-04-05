@@ -4,19 +4,20 @@ Thin wrapper around the publicly-accessible endpoint
 
     POST https://scanner.tradingview.com/{market}/scan
 
-Used by EVTS to build dynamic earnings calendars without hand-maintained
-ticker lists. The scanner's ``earnings_release_next_date`` column gives
-us the next earnings date directly — no per-ticker yfinance round-trips.
+Used by EVTS to build dynamic earnings calendars. The scanner's
+``earnings_release_next_date`` column gives us the next earnings date
+directly — no per-ticker yfinance round-trips.
 
-Key gotcha: Nordic share-class tickers contain underscores in TradingView
-(e.g. ``SEB_A``, ``HM_B``) but Yahoo Finance uses hyphens (``SEB-A``,
-``HM-B``). We convert automatically.
+Country → Yahoo suffix mapping is sourced from the canonical registry
+in ``functions._countries`` (single source of truth).
 """
 
 import json
 import urllib.request
 from datetime import datetime, date, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
+
+from functions._countries import yf_suffix_for_name, by_tv_scanner
 
 
 SCANNER_URL = 'https://scanner.tradingview.com/{market}/scan'
@@ -32,85 +33,18 @@ _UA = {
 }
 
 
-# ── Country name (from scanner's ``country`` column) → Yahoo suffix ──
-# This is the authoritative mapping. The scanner returns the country as
-# a human-readable string; we use it to determine the Yahoo ticker
-# suffix, which is more reliable than guessing from the market slug
-# (one market can span multiple countries/exchanges).
-COUNTRY_YF_SUFFIX = {
-    'United States':    '',
-    'Japan':            '.T',
-    'Germany':          '.DE',
-    'France':           '.PA',
-    'Netherlands':      '.AS',
-    'Belgium':          '.BR',
-    'Italy':            '.MI',
-    'Spain':            '.MC',
-    'Switzerland':      '.SW',
-    'United Kingdom':   '.L',
-    'Hong Kong':        '.HK',
-    'China':            '.SS',
-    'Sweden':           '.ST',
-    'Denmark':          '.CO',
-    'Finland':          '.HE',
-    'Norway':           '.OL',
-    'Austria':          '.VI',
-    'Portugal':         '.LS',
-    'Ireland':          '.IR',
-    'Canada':           '.TO',
-    'Australia':        '.AX',
-    'India':            '.NS',
-    'Brazil':           '.SA',
-    'Mexico':           '.MX',
-    'South Korea':      '.KS',
-    'Taiwan':           '.TW',
-    'Singapore':        '.SI',
-    'Israel':           '.TA',
-    'South Africa':     '.JO',
-    'Turkey':           '.IS',
-    'New Zealand':      '.NZ',
-    'Poland':           '.WA',
-    'Greece':           '.AT',
-    'Luxembourg':       '.LU',
-    'Czech Republic':   '.PR',
-    'Hungary':          '.BD',
-}
-
-# Fallback: market-slug → suffix for rows missing a ``country`` value.
-MARKET_YF_SUFFIX = {
-    'america':      '',
-    'japan':        '.T',
-    'germany':      '.DE',
-    'france':       '.PA',
-    'netherlands':  '.AS',
-    'belgium':      '.BR',
-    'italy':        '.MI',
-    'spain':        '.MC',
-    'switzerland':  '.SW',
-    'uk':           '.L',
-    'hongkong':     '.HK',
-    'china':        '.SS',
-    'sweden':       '.ST',
-    'denmark':      '.CO',
-    'finland':      '.HE',
-    'norway':       '.OL',
-    'canada':       '.TO',
-    'australia':    '.AX',
-    'india':        '.NS',
-    'brazil':       '.SA',
-    'mexico':       '.MX',
-    'korea':        '.KS',
-}
-
-
-def _to_yahoo_ticker(tv_name: str, country: str, market_slug: str) -> str:
-    """Convert a TradingView ticker name to a Yahoo Finance ticker.
+def _to_yahoo_ticker(tv_name: str, country_name: str, market_slug: str) -> str:
+    """Convert a TradingView ticker to a Yahoo Finance ticker.
 
     - Replaces underscores with hyphens (``SEB_A`` → ``SEB-A``).
-    - Appends the correct Yahoo suffix based on the ``country`` field.
+    - Looks up the suffix from the country registry.
     """
     base = tv_name.replace('_', '-')
-    suffix = COUNTRY_YF_SUFFIX.get(country) or MARKET_YF_SUFFIX.get(market_slug, '')
+    suffix = yf_suffix_for_name(country_name)
+    if not suffix:
+        # Fallback: derive from the market slug via the registry
+        c = by_tv_scanner(market_slug)
+        suffix = c.yf_suffix if c else ''
     return f'{base}{suffix}'
 
 
@@ -143,34 +77,24 @@ def _post_scanner(market: str, columns: List[str], top_n: int = 10000,
     return payload.get('data') or []
 
 
-# ═══════════════════════════════════════
-# Public helpers
-# ═══════════════════════════════════════
-
 def fetch_earnings_calendar(
     markets: List[str],
     days: int = 14,
 ) -> List[Dict[str, Any]]:
     """Fetch upcoming earnings from the TV scanner in a single call per market.
 
-    Instead of polling yfinance per-ticker, we request the
-    ``earnings_release_next_date`` column from the scanner and filter
-    to the requested window.
-
-    Returns a list of row dicts compatible with EVTS's frontend shape:
-    ``{date, ticker, name, eps_estimate, last_year_eps, market_cap,
-    time, country, tv_symbol}``
+    Returns a list of row dicts compatible with EVTS's frontend shape.
     """
     from concurrent.futures import ThreadPoolExecutor
 
     columns = [
-        'name',                                     # 0 — ticker base (e.g. ASML)
+        'name',                                     # 0 — ticker base
         'description',                              # 1 — company name
         'market_cap_basic',                          # 2
-        'earnings_release_next_date',                # 3 — Unix timestamp (seconds)
-        'earnings_per_share_forecast_next_fq',       # 4 — EPS estimate next FQ
+        'earnings_release_next_date',                # 3 — Unix timestamp
+        'earnings_per_share_forecast_next_fq',       # 4 — EPS estimate
         'earnings_per_share_basic_ttm',              # 5 — trailing EPS
-        'country',                                   # 6 — for Yahoo suffix
+        'country',                                   # 6
     ]
 
     today = date.today()
@@ -190,7 +114,6 @@ def fetch_earnings_calendar(
             if len(d) < 7 or not tv_sym:
                 continue
 
-            # Parse earnings date (scanner returns Unix timestamp in seconds)
             raw_date = d[3]
             if not raw_date or not isinstance(raw_date, (int, float)):
                 continue
