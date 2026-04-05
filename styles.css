@@ -2130,3 +2130,217 @@ body {
     font-size: 24px;
   }
 }
+
+
+/* ═══════════════════════════════════════════════════════════
+   HOME PAGE — Market Dashboard (post-login start screen)
+   ═══════════════════════════════════════════════════════════ */
+
+.dashboard--home {
+  display: block !important;
+  padding: 0;
+  overflow: auto;
+}
+
+.home-wrapper {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 24px 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Quote Hero ── */
+.home-quote {
+  position: relative;
+  padding: 28px 36px;
+  background:
+    linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-panel) 100%);
+  border: 1px solid var(--border-primary);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.home-quote::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -10%;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.home-quote__date {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: var(--accent);
+  margin-bottom: 14px;
+}
+
+.home-quote__text {
+  position: relative;
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-primary);
+  font-style: italic;
+  margin-bottom: 14px;
+  max-width: 960px;
+}
+
+.home-quote__mark {
+  color: var(--accent);
+  font-size: 28px;
+  font-weight: 700;
+  font-style: normal;
+  padding: 0 2px;
+}
+
+.home-quote__author {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+/* ── Market Grid ── */
+.home-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1.6fr 1fr;
+  grid-template-rows: minmax(420px, 1.2fr) minmax(220px, auto) minmax(220px, auto);
+  grid-template-areas:
+    "markets news"
+    "yields  news"
+    "commod  news";
+}
+
+.home-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.home-panel--markets { grid-area: markets; }
+.home-panel--news    { grid-area: news; }
+.home-panel--yields  { grid-area: yields; }
+.home-panel--quotes  { grid-area: commod; }
+
+.home-panel .panel__body {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.home-panel--news .panel__body {
+  padding: 0;
+}
+
+/* ── Function Hints ── */
+.home-functions {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+}
+
+.home-functions__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.home-functions__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.func-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius);
+  cursor: default;
+  transition: all 0.2s var(--ease);
+}
+
+.func-card:hover {
+  background: var(--bg-panel-hover);
+  border-color: var(--accent-dim);
+  transform: translateY(-1px);
+}
+
+.func-card__code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  min-width: 48px;
+  letter-spacing: 0.5px;
+}
+
+.func-card__desc {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.home-functions__hint {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-primary);
+}
+
+/* ── Home tab button styling (distinct highlight) ── */
+.nav-tabs__tab--home {
+  border-right: 1px solid var(--border-primary);
+  margin-right: 2px;
+}
+
+.nav-tabs__tab--home.nav-tabs__tab--active {
+  color: var(--accent);
+}
+
+/* ── Responsive ── */
+@media (max-width: 1100px) {
+  .home-grid {
+    grid-template-areas:
+      "markets"
+      "news"
+      "yields"
+      "commod";
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(380px, auto) minmax(360px, auto) minmax(220px, auto) minmax(220px, auto);
+  }
+}
+
+@media (max-width: 700px) {
+  .home-wrapper { padding: 16px; gap: 14px; }
+  .home-quote { padding: 20px 22px; }
+  .home-quote__text { font-size: 16px; }
+  .home-functions { padding: 16px; }
+}

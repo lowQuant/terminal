@@ -9,7 +9,8 @@ const state = {
   currentSymbol: 'NASDAQ:AAPL',   // TradingView format: EXCHANGE:TICKER
   currentExchange: 'NASDAQ',
   currentTicker: 'AAPL',
-  activeTab: 'overview',
+  activeTab: 'home',
+  symbolLoaded: false,              // becomes true after the first ticker search
   recentSymbols: JSON.parse(localStorage.getItem('terminal_recent') || '[]'),
   companyInfo: null,
   newsData: null,
@@ -59,8 +60,9 @@ function initTerminal() {
   initClock();
   initKeyboardShortcuts();
   initArticleModal();
-  loadSymbol(state.currentSymbol);
   renderTickerTape();
+  // Start on the Home page — no ticker loaded until the user searches one.
+  setActiveTab('home');
 }
 
 // Legacy fallback: if auth.js is not loaded or Supabase is unconfigured,
@@ -451,8 +453,15 @@ function loadSymbol(fullSymbol, tvSupported, companyName) {
   ].slice(0, 20);
   localStorage.setItem('terminal_recent', JSON.stringify(state.recentSymbols));
 
+  state.symbolLoaded = true;
   updateSymbolBar(companyName);
-  loadTabContent(state.activeTab);
+
+  // If we were on the Home page, flip to Overview on first ticker search.
+  if (state.activeTab === 'home') {
+    setActiveTab('overview');
+  } else {
+    loadTabContent(state.activeTab);
+  }
   updateStatusBar();
 }
 
@@ -550,15 +559,360 @@ function setActiveTab(tabName) {
 
 function loadTabContent(tabName) {
   const dashboard = $('#dashboard');
+  const symbolBar = $('#symbol-bar');
+
+  // Show the active-symbol bar only when viewing a ticker-bound tab.
+  if (tabName === 'home') {
+    if (symbolBar) symbolBar.style.display = 'none';
+  } else if (state.symbolLoaded && symbolBar) {
+    symbolBar.style.display = '';
+  }
+
+  // If the user clicks a ticker-bound tab before searching anything,
+  // fall back to the Home page with a hint.
+  if (tabName !== 'home' && !state.symbolLoaded) {
+    setActiveTab('home');
+    return;
+  }
+
   switch (tabName) {
+    case 'home': renderHome(dashboard); break;
     case 'overview': renderOverview(dashboard); break;
     case 'chart': renderFullChart(dashboard); break;
     case 'news': renderNews(dashboard); break;
     case 'financials': renderFinancials(dashboard); break;
     case 'profile': renderProfile(dashboard); break;
     case 'watchlist': renderWatchlist(dashboard); break;
-    default: renderOverview(dashboard);
+    default: renderHome(dashboard);
   }
+}
+
+
+// ═══════════════════════════════════════
+// HOME TAB — Market Dashboard + Daily Quote
+// ═══════════════════════════════════════
+
+// Curated quotes from famous investors, traders, psychologists & thinkers.
+// Rotates deterministically by day-of-year so every user sees the same
+// quote on a given day.
+const MARKET_QUOTES = [
+  { text: "The stock market is a device for transferring money from the impatient to the patient.", author: "Warren Buffett" },
+  { text: "Be fearful when others are greedy, and greedy when others are fearful.", author: "Warren Buffett" },
+  { text: "In the short run, the market is a voting machine, but in the long run, it is a weighing machine.", author: "Benjamin Graham" },
+  { text: "The investor's chief problem — and even his worst enemy — is likely to be himself.", author: "Benjamin Graham" },
+  { text: "Risk comes from not knowing what you're doing.", author: "Warren Buffett" },
+  { text: "The four most dangerous words in investing are: 'this time it's different.'", author: "Sir John Templeton" },
+  { text: "Markets can remain irrational longer than you can remain solvent.", author: "John Maynard Keynes" },
+  { text: "The individual investor should act consistently as an investor and not as a speculator.", author: "Benjamin Graham" },
+  { text: "How many millionaires do you know who have become wealthy by investing in savings accounts?", author: "Robert G. Allen" },
+  { text: "The goal of a successful trader is to make the best trades. Money is secondary.", author: "Alexander Elder" },
+  { text: "I'm only rich because I know when I'm wrong.", author: "George Soros" },
+  { text: "It's not whether you're right or wrong that's important, but how much money you make when you're right and how much you lose when you're wrong.", author: "George Soros" },
+  { text: "The trend is your friend until the end when it bends.", author: "Ed Seykota" },
+  { text: "Amateurs think about how much money they can make. Professionals think about how much money they could lose.", author: "Jack Schwager" },
+  { text: "The elements of good trading are: cutting losses, cutting losses, and cutting losses.", author: "Ed Seykota" },
+  { text: "Every once in a while, the market does something so stupid it takes your breath away.", author: "Jim Cramer" },
+  { text: "Time in the market beats timing the market.", author: "Ken Fisher" },
+  { text: "The four most expensive words in the English language are 'This time it's different.'", author: "Sir John Templeton" },
+  { text: "October: This is one of the peculiarly dangerous months to speculate in stocks. The others are July, January, September, April, November, May, March, June, December, August and February.", author: "Mark Twain" },
+  { text: "The market can stay irrational longer than you can stay solvent.", author: "John Maynard Keynes" },
+  { text: "Bulls make money, bears make money, pigs get slaughtered.", author: "Wall Street Proverb" },
+  { text: "Know what you own, and know why you own it.", author: "Peter Lynch" },
+  { text: "Far more money has been lost by investors preparing for corrections than has been lost in corrections themselves.", author: "Peter Lynch" },
+  { text: "The stock market is filled with individuals who know the price of everything, but the value of nothing.", author: "Phillip Fisher" },
+  { text: "The key to making money in stocks is not to get scared out of them.", author: "Peter Lynch" },
+  { text: "An investment in knowledge pays the best interest.", author: "Benjamin Franklin" },
+  { text: "Wide diversification is only required when investors do not understand what they are doing.", author: "Warren Buffett" },
+  { text: "Rule No. 1: Never lose money. Rule No. 2: Never forget rule No. 1.", author: "Warren Buffett" },
+  { text: "The most important quality for an investor is temperament, not intellect.", author: "Warren Buffett" },
+  { text: "If you have trouble imagining a 20% loss in the stock market, you shouldn't be in stocks.", author: "John Bogle" },
+  { text: "Don't look for the needle in the haystack. Just buy the haystack!", author: "John Bogle" },
+  { text: "The biggest risk of all is not taking one.", author: "Mellody Hobson" },
+  { text: "Behind every stock is a company. Find out what it's doing.", author: "Peter Lynch" },
+  { text: "The essence of investment management is the management of risks, not the management of returns.", author: "Benjamin Graham" },
+  { text: "We don't have to be smarter than the rest. We have to be more disciplined than the rest.", author: "Warren Buffett" },
+  { text: "The market is a pendulum that forever swings between unsustainable optimism and unjustified pessimism.", author: "Benjamin Graham" },
+  { text: "Losers average losers.", author: "Paul Tudor Jones" },
+  { text: "The key is to wait. Sometimes the hardest thing to do is to do nothing.", author: "David Tepper" },
+  { text: "I became a millionaire by trying to be right — not by trying to make money.", author: "Nicolas Darvas" },
+  { text: "Markets are never wrong — opinions are.", author: "Jesse Livermore" },
+  { text: "It was never my thinking that made big money for me. It was my sitting.", author: "Jesse Livermore" },
+  { text: "The fundamental law of investing is the uncertainty of the future.", author: "Peter Bernstein" },
+  { text: "Risk management is the most important thing to be well understood. Undertrade, undertrade, undertrade.", author: "Bruce Kovner" },
+  { text: "Humans think in stories, and we try to make sense of the world by telling stories.", author: "Daniel Kahneman" },
+  { text: "Nothing in life is as important as you think it is while you are thinking about it.", author: "Daniel Kahneman" },
+  { text: "A lot of success in life and business comes from knowing what you want to avoid.", author: "Charlie Munger" },
+  { text: "The big money is not in the buying and selling, but in the waiting.", author: "Charlie Munger" },
+  { text: "All intelligent investing is value investing — acquiring more than you are paying for.", author: "Charlie Munger" },
+  { text: "Invert, always invert.", author: "Charlie Munger" },
+  { text: "Take calculated risks. That is quite different from being rash.", author: "George S. Patton" },
+];
+
+function getQuoteOfTheDay() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  const diff = now - start;
+  const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
+  return MARKET_QUOTES[dayOfYear % MARKET_QUOTES.length];
+}
+
+function renderHome(container) {
+  container.className = 'dashboard dashboard--home';
+  const quote = getQuoteOfTheDay();
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+
+  container.innerHTML = `
+    <div class="home-wrapper">
+      <!-- Quote Hero -->
+      <section class="home-quote">
+        <div class="home-quote__date">${today.toUpperCase()}</div>
+        <blockquote class="home-quote__text">
+          <span class="home-quote__mark">&ldquo;</span>${escHtml(quote.text)}<span class="home-quote__mark">&rdquo;</span>
+        </blockquote>
+        <div class="home-quote__author">— ${escHtml(quote.author)}</div>
+      </section>
+
+      <!-- Market Grid -->
+      <section class="home-grid">
+        <!-- Major Markets (Indices / Futures / Forex / Bonds tabs) -->
+        <div class="panel home-panel home-panel--markets">
+          <div class="panel__header">
+            <div class="panel__title"><span class="panel__title-dot"></span> Global Markets</div>
+          </div>
+          <div class="panel__body" id="home-market-overview"></div>
+        </div>
+
+        <!-- Top News Feed -->
+        <div class="panel home-panel home-panel--news">
+          <div class="panel__header">
+            <div class="panel__title"><span class="panel__title-dot"></span> Top News</div>
+          </div>
+          <div class="panel__body" id="home-news-feed"></div>
+        </div>
+
+        <!-- US Yield Curve -->
+        <div class="panel home-panel home-panel--yields">
+          <div class="panel__header">
+            <div class="panel__title"><span class="panel__title-dot"></span> US Treasury Yields</div>
+          </div>
+          <div class="panel__body" id="home-yields"></div>
+        </div>
+
+        <!-- Commodities + FX snapshot -->
+        <div class="panel home-panel home-panel--quotes">
+          <div class="panel__header">
+            <div class="panel__title"><span class="panel__title-dot"></span> Commodities &amp; FX</div>
+          </div>
+          <div class="panel__body" id="home-commodities"></div>
+        </div>
+      </section>
+
+      <!-- Function Hints -->
+      <section class="home-functions">
+        <div class="home-functions__label">Quick functions — type in search:</div>
+        <div class="home-functions__grid">
+          <div class="func-card" title="Economic calendar &amp; releases">
+            <div class="func-card__code">ECO</div>
+            <div class="func-card__desc">Economic Data &amp; Releases</div>
+          </div>
+          <div class="func-card" title="World equity futures">
+            <div class="func-card__code">WEIF</div>
+            <div class="func-card__desc">World Equity Futures</div>
+          </div>
+          <div class="func-card" title="Commodity overview">
+            <div class="func-card__code">CMDTY</div>
+            <div class="func-card__desc">Commodity Overview</div>
+          </div>
+          <div class="func-card" title="Foreign exchange cross rates">
+            <div class="func-card__code">FX</div>
+            <div class="func-card__desc">Currency Cross Rates</div>
+          </div>
+          <div class="func-card" title="Top movers — gainers &amp; losers">
+            <div class="func-card__code">MOV</div>
+            <div class="func-card__desc">Top Movers</div>
+          </div>
+          <div class="func-card" title="Your personalized watchlist">
+            <div class="func-card__code">WL</div>
+            <div class="func-card__desc">Watchlist</div>
+          </div>
+        </div>
+        <div class="home-functions__hint">
+          <span class="kbd">/</span> to search any ticker or function &nbsp;·&nbsp;
+          <span class="kbd">0</span> Home &nbsp;·&nbsp;
+          <span class="kbd">1</span>–<span class="kbd">6</span> Ticker tabs
+        </div>
+      </section>
+    </div>
+  `;
+
+  injectMarketOverview('home-market-overview');
+  injectTimeline('home-news-feed');
+  injectYieldCurve('home-yields');
+  injectCommodityQuotes('home-commodities');
+}
+
+// ── Home page widget injectors ──
+function injectMarketOverview(containerId) {
+  injectWidget(containerId,
+    'https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js',
+    {
+      colorTheme: 'dark',
+      dateRange: '12M',
+      showChart: true,
+      locale: 'en',
+      width: '100%',
+      height: '100%',
+      largeChartUrl: '',
+      isTransparent: true,
+      showSymbolLogo: true,
+      showFloatingTooltip: false,
+      plotLineColorGrowing: 'rgba(0, 230, 118, 1)',
+      plotLineColorFalling: 'rgba(255, 82, 82, 1)',
+      gridLineColor: 'rgba(30, 32, 48, 0.6)',
+      scaleFontColor: 'rgba(138, 140, 160, 1)',
+      belowLineFillColorGrowing: 'rgba(0, 230, 118, 0.12)',
+      belowLineFillColorFalling: 'rgba(255, 82, 82, 0.12)',
+      belowLineFillColorGrowingBottom: 'rgba(0, 230, 118, 0)',
+      belowLineFillColorFallingBottom: 'rgba(255, 82, 82, 0)',
+      symbolActiveColor: 'rgba(255, 140, 0, 0.12)',
+      tabs: [
+        {
+          title: 'Indices',
+          symbols: [
+            { s: 'FOREXCOM:SPXUSD', d: 'S&P 500' },
+            { s: 'FOREXCOM:NSXUSD', d: 'NASDAQ 100' },
+            { s: 'FOREXCOM:DJI', d: 'Dow Jones' },
+            { s: 'INDEX:DEU40', d: 'DAX' },
+            { s: 'INDEX:SX5E', d: 'Euro Stoxx 50' },
+            { s: 'INDEX:NKY', d: 'Nikkei 225' },
+            { s: 'INDEX:HSI', d: 'Hang Seng' },
+            { s: 'BMFBOVESPA:IBOV', d: 'Ibovespa' },
+            { s: 'CBOE:VIX', d: 'VIX' },
+          ],
+          originalTitle: 'Indices',
+        },
+        {
+          title: 'Futures',
+          symbols: [
+            { s: 'CME_MINI:ES1!', d: 'S&P 500' },
+            { s: 'CME_MINI:NQ1!', d: 'Nasdaq 100' },
+            { s: 'CBOT_MINI:YM1!', d: 'Dow' },
+            { s: 'NYMEX:CL1!', d: 'Crude Oil' },
+            { s: 'COMEX:GC1!', d: 'Gold' },
+            { s: 'COMEX:SI1!', d: 'Silver' },
+            { s: 'NYMEX:NG1!', d: 'Nat Gas' },
+          ],
+          originalTitle: 'Futures',
+        },
+        {
+          title: 'Forex',
+          symbols: [
+            { s: 'FX:EURUSD', d: 'EUR/USD' },
+            { s: 'FX:GBPUSD', d: 'GBP/USD' },
+            { s: 'FX:USDJPY', d: 'USD/JPY' },
+            { s: 'FX:USDCHF', d: 'USD/CHF' },
+            { s: 'FX:AUDUSD', d: 'AUD/USD' },
+            { s: 'FX:USDCAD', d: 'USD/CAD' },
+            { s: 'TVC:DXY',    d: 'Dollar Index' },
+          ],
+          originalTitle: 'Forex',
+        },
+        {
+          title: 'Bonds',
+          symbols: [
+            { s: 'TVC:US02Y', d: 'US 2Y' },
+            { s: 'TVC:US05Y', d: 'US 5Y' },
+            { s: 'TVC:US10Y', d: 'US 10Y' },
+            { s: 'TVC:US30Y', d: 'US 30Y' },
+            { s: 'TVC:DE10Y', d: 'Bund 10Y' },
+            { s: 'TVC:GB10Y', d: 'Gilt 10Y' },
+            { s: 'TVC:JP10Y', d: 'JGB 10Y' },
+          ],
+          originalTitle: 'Bonds',
+        },
+      ],
+    }
+  );
+}
+
+function injectTimeline(containerId) {
+  injectWidget(containerId,
+    'https://s3.tradingview.com/external-embedding/embed-widget-timeline.js',
+    {
+      feedMode: 'all_symbols',
+      isTransparent: true,
+      displayMode: 'regular',
+      width: '100%',
+      height: '100%',
+      colorTheme: 'dark',
+      locale: 'en',
+    }
+  );
+}
+
+function injectYieldCurve(containerId) {
+  injectWidget(containerId,
+    'https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js',
+    {
+      width: '100%',
+      height: '100%',
+      symbolsGroups: [
+        {
+          name: 'US Treasury Yields',
+          originalName: 'US Treasury Yields',
+          symbols: [
+            { name: 'TVC:US02Y', displayName: '2-Year' },
+            { name: 'TVC:US05Y', displayName: '5-Year' },
+            { name: 'TVC:US10Y', displayName: '10-Year' },
+            { name: 'TVC:US30Y', displayName: '30-Year' },
+          ],
+        },
+      ],
+      showSymbolLogo: false,
+      isTransparent: true,
+      colorTheme: 'dark',
+      locale: 'en',
+    }
+  );
+}
+
+function injectCommodityQuotes(containerId) {
+  injectWidget(containerId,
+    'https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js',
+    {
+      width: '100%',
+      height: '100%',
+      symbolsGroups: [
+        {
+          name: 'Commodities',
+          originalName: 'Commodities',
+          symbols: [
+            { name: 'COMEX:GC1!',   displayName: 'Gold' },
+            { name: 'COMEX:SI1!',   displayName: 'Silver' },
+            { name: 'NYMEX:CL1!',   displayName: 'Crude Oil' },
+            { name: 'NYMEX:NG1!',   displayName: 'Nat Gas' },
+            { name: 'COMEX:HG1!',   displayName: 'Copper' },
+          ],
+        },
+        {
+          name: 'FX Majors',
+          originalName: 'FX Majors',
+          symbols: [
+            { name: 'FX:EURUSD',  displayName: 'EUR/USD' },
+            { name: 'FX:GBPUSD',  displayName: 'GBP/USD' },
+            { name: 'FX:USDJPY',  displayName: 'USD/JPY' },
+            { name: 'TVC:DXY',    displayName: 'Dollar Index' },
+          ],
+        },
+      ],
+      showSymbolLogo: false,
+      isTransparent: true,
+      colorTheme: 'dark',
+      locale: 'en',
+    }
+  );
 }
 
 
@@ -1428,8 +1782,10 @@ function initKeyboardShortcuts() {
       $('#ticker-input').focus();
     }
 
-    // 1-6 = switch tabs
-    if (e.key >= '1' && e.key <= '6') {
+    // 0 = Home, 1-6 = ticker tabs
+    if (e.key === '0') {
+      setActiveTab('home');
+    } else if (e.key >= '1' && e.key <= '6') {
       const tabs = ['overview', 'chart', 'news', 'financials', 'profile', 'watchlist'];
       const idx = parseInt(e.key) - 1;
       if (tabs[idx]) setActiveTab(tabs[idx]);

@@ -183,7 +183,7 @@
   <div class="ticker-tape-bar" id="ticker-tape"></div>
 
   <!-- ══════════ ACTIVE SYMBOL BAR ══════════ -->
-  <div class="symbol-bar" id="symbol-bar">
+  <div class="symbol-bar" id="symbol-bar" style="display:none">
     <span class="symbol-bar__ticker" id="symbol-ticker">AAPL</span>
     <span class="symbol-bar__name" id="symbol-name">Apple Inc.</span>
     <span class="symbol-bar__divider"></span>
@@ -192,7 +192,10 @@
 
   <!-- ══════════ NAV TABS ══════════ -->
   <nav class="nav-tabs" id="nav-tabs">
-    <button class="nav-tabs__tab nav-tabs__tab--active" data-tab="overview">
+    <button class="nav-tabs__tab nav-tabs__tab--home nav-tabs__tab--active" data-tab="home">
+      <span class="kbd" style="margin-right:4px">0</span> Home
+    </button>
+    <button class="nav-tabs__tab" data-tab="overview">
       <span class="kbd" style="margin-right:4px">1</span> Overview
     </button>
     <button class="nav-tabs__tab" data-tab="chart">
