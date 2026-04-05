@@ -1041,29 +1041,8 @@ function injectTimeline(containerId) {
 // so we draw a static header bar above the iframe whose tracks
 // approximately align with the widget's internal columns.
 
-// Country codes here must match those accepted by TradingView's
-// countryFilter parameter (ISO2, lowercase).
-const ECO_COUNTRIES = [
-  { code: 'us', label: 'United States',  flag: '🇺🇸' },
-  { code: 'eu', label: 'Eurozone',       flag: '🇪🇺' },
-  { code: 'gb', label: 'United Kingdom', flag: '🇬🇧' },
-  { code: 'de', label: 'Germany',        flag: '🇩🇪' },
-  { code: 'fr', label: 'France',         flag: '🇫🇷' },
-  { code: 'it', label: 'Italy',          flag: '🇮🇹' },
-  { code: 'es', label: 'Spain',          flag: '🇪🇸' },
-  { code: 'ch', label: 'Switzerland',    flag: '🇨🇭' },
-  { code: 'jp', label: 'Japan',          flag: '🇯🇵' },
-  { code: 'cn', label: 'China',          flag: '🇨🇳' },
-  { code: 'in', label: 'India',          flag: '🇮🇳' },
-  { code: 'kr', label: 'South Korea',    flag: '🇰🇷' },
-  { code: 'au', label: 'Australia',      flag: '🇦🇺' },
-  { code: 'nz', label: 'New Zealand',    flag: '🇳🇿' },
-  { code: 'ca', label: 'Canada',         flag: '🇨🇦' },
-  { code: 'mx', label: 'Mexico',         flag: '🇲🇽' },
-  { code: 'br', label: 'Brazil',         flag: '🇧🇷' },
-  { code: 'tr', label: 'Turkey',         flag: '🇹🇷' },
-  { code: 'za', label: 'South Africa',   flag: '🇿🇦' },
-];
+// ECO country list is fetched from the backend registry via
+// getEcoCountries() — no hardcoded list here.
 
 function renderEcoCalendar(container) {
   container.className = 'dashboard dashboard--function';
@@ -1104,22 +1083,27 @@ function renderEcoCalendar(container) {
       </div>
     </div>
   `;
-  renderEcoCountryFilter();
-  injectEcoWidget();
   setDataSource('TradingView');
+
+  // Fetch countries from registry then render filter + inject widget
+  getEcoCountries().then((countries) => {
+    renderEcoCountryFilter(countries);
+    injectEcoWidget();
+  });
 }
 
-function renderEcoCountryFilter() {
+function renderEcoCountryFilter(countries) {
   const container = $('#eco-country-filter');
   if (!container) return;
-  container.innerHTML = ECO_COUNTRIES.map((c) => {
+  const list = countries || _ecoCountries || [];
+  container.innerHTML = list.map((c) => {
     const active = state.ecoCountries.includes(c.code);
     return `
       <button class="country-btn ${active ? 'country-btn--active' : ''}"
               onclick="toggleEcoCountry('${c.code}')"
-              title="${escHtml(c.label)}">
+              title="${escHtml(c.label || c.name || '')}">
         <span class="country-btn__flag">${c.flag}</span>
-        <span class="country-btn__code">${c.code.toUpperCase()}</span>
+        <span class="country-btn__code">${(c.code || '').toUpperCase()}</span>
       </button>
     `;
   }).join('');
@@ -1134,7 +1118,7 @@ function toggleEcoCountry(code) {
 }
 
 function setEcoAllCountries() {
-  state.ecoCountries = ECO_COUNTRIES.map((c) => c.code);
+  state.ecoCountries = (_ecoCountries || []).map((c) => c.code);
   renderEcoCountryFilter();
   injectEcoWidget();
 }
@@ -1187,28 +1171,49 @@ const evtsState = {
   country: 'US',         // 'US' | 'EU' | 'JP' | 'HK'
 };
 
-// Available countries & their data source labels. US uses NASDAQ's
-// public API; EU/JP/HK use yfinance polled across the benchmark index
-// constituents (STOXX 50 + FTSE top / Nikkei 225 / Hang Seng).
-const EVTS_COUNTRIES = [
-  { code: 'US', label: 'United States',  flag: '🇺🇸', scopeAllLabel: 'All US Companies' },
-  { code: 'EU', label: 'Europe',         flag: '🇪🇺', scopeAllLabel: 'All European' },
-  { code: 'JP', label: 'Japan',          flag: '🇯🇵', scopeAllLabel: 'All Japanese' },
-  { code: 'HK', label: 'Hong Kong',      flag: '🇭🇰', scopeAllLabel: 'All Hong Kong' },
-];
+// Country lists are fetched from the backend registry (/api/countries/*).
+// Cached in state so we only fetch once per session.
+// Fallback to hardcoded US-only if the API call fails.
+let _scannerCountries = null;  // fetched from /api/countries/scanner
+let _ecoCountries = null;      // fetched from /api/countries/eco
+
+async function getScannerCountries() {
+  if (_scannerCountries) return _scannerCountries;
+  try {
+    const resp = await fetch('/api/countries/scanner');
+    if (resp.ok) {
+      const data = await resp.json();
+      // EU is a virtual region (no single tv_scanner slug) — add it
+      // at the front if we have European countries.
+      const hasEurope = data.some((c) => c.region === 'europe');
+      const list = hasEurope
+        ? [{ code: 'EU', name: 'Europe', flag: '🇪🇺', region: 'europe' }, ...data]
+        : data;
+      _scannerCountries = list;
+      return list;
+    }
+  } catch (e) { console.warn('Failed to fetch scanner countries:', e); }
+  _scannerCountries = [{ code: 'US', name: 'United States', flag: '🇺🇸', region: 'americas' }];
+  return _scannerCountries;
+}
+
+async function getEcoCountries() {
+  if (_ecoCountries) return _ecoCountries;
+  try {
+    const resp = await fetch('/api/countries/eco');
+    if (resp.ok) {
+      _ecoCountries = await resp.json();
+      return _ecoCountries;
+    }
+  } catch (e) { console.warn('Failed to fetch ECO countries:', e); }
+  _ecoCountries = [{ code: 'us', label: 'United States', flag: '🇺🇸' }];
+  return _ecoCountries;
+}
 
 function renderEventsCalendar(container) {
   container.className = 'dashboard dashboard--function';
-  const countryHtml = EVTS_COUNTRIES.map((c) => {
-    const active = c.code === evtsState.country ? 'country-btn--active' : '';
-    return `
-      <button class="country-btn ${active}" data-evts-country="${c.code}">
-        <span class="country-btn__flag">${c.flag}</span>
-        <span class="country-btn__code">${c.code}</span>
-      </button>
-    `;
-  }).join('');
 
+  // Render skeleton first, then populate countries once fetched
   container.innerHTML = `
     <div class="function-wrapper">
       <header class="function-header">
@@ -1223,7 +1228,9 @@ function renderEventsCalendar(container) {
 
       <div class="function-toolbar">
         <div class="function-toolbar__label">Country</div>
-        <div class="range-filter" id="evts-country-filter">${countryHtml}</div>
+        <div class="range-filter" id="evts-country-filter">
+          <span class="text-muted" style="font-size:11px">Loading countries…</span>
+        </div>
       </div>
 
       <div class="function-toolbar">
@@ -1254,18 +1261,7 @@ function renderEventsCalendar(container) {
     </div>
   `;
 
-  // Wire country filter (triggers refetch from backend)
-  $$('#evts-country-filter .country-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      $$('#evts-country-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
-      btn.classList.add('country-btn--active');
-      evtsState.country = btn.dataset.evtsCountry;
-      updateEvtsScopeLabel();
-      loadEvtsCalendar();
-    });
-  });
-
-  // Wire scope filter (client-side)
+  // Wire scope + range filters (static, don't depend on countries)
   $$('#evts-scope-filter .country-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       $$('#evts-scope-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
@@ -1274,8 +1270,6 @@ function renderEventsCalendar(container) {
       renderEvtsTable();
     });
   });
-
-  // Wire range filter (triggers refetch)
   $$('#evts-range-filter .country-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       $$('#evts-range-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
@@ -1285,21 +1279,50 @@ function renderEventsCalendar(container) {
     });
   });
 
-  updateEvtsScopeLabel();
-  loadEvtsCalendar();
+  // Fetch countries from registry, then render the filter + load data
+  getScannerCountries().then((countries) => {
+    renderEvtsCountryFilter(countries);
+    updateEvtsScopeLabel();
+    loadEvtsCalendar();
+  });
+}
+
+function renderEvtsCountryFilter(countries) {
+  const container = $('#evts-country-filter');
+  if (!container) return;
+  container.innerHTML = countries.map((c) => {
+    const active = c.code === evtsState.country ? 'country-btn--active' : '';
+    return `
+      <button class="country-btn ${active}" data-evts-country="${c.code}">
+        <span class="country-btn__flag">${c.flag}</span>
+        <span class="country-btn__code">${escHtml(c.code)}</span>
+      </button>
+    `;
+  }).join('');
+
+  // Wire click handlers
+  $$('#evts-country-filter .country-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('#evts-country-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
+      btn.classList.add('country-btn--active');
+      evtsState.country = btn.dataset.evtsCountry;
+      updateEvtsScopeLabel();
+      loadEvtsCalendar();
+    });
+  });
 }
 
 function updateEvtsScopeLabel() {
-  const country = EVTS_COUNTRIES.find((c) => c.code === evtsState.country);
-  const label = country ? country.scopeAllLabel : 'All';
+  const countries = _scannerCountries || [];
+  const country = countries.find((c) => c.code === evtsState.country);
+  const label = country ? `All ${country.name}` : 'All';
   const btn = $('#evts-scope-all');
   if (btn) btn.textContent = label;
-  // Subtitle reflects the scope of coverage
   const sub = $('#evts-subtitle');
-  if (sub && country) {
-    sub.textContent = country.code === 'US'
+  if (sub) {
+    sub.textContent = evtsState.country === 'US'
       ? 'Upcoming earnings — full US market coverage (NASDAQ)'
-      : `Upcoming earnings — ${country.scopeAllLabel} (TradingView scanner)`;
+      : `Upcoming earnings — all ${country ? country.name : evtsState.country} (TradingView scanner)`;
   }
 }
 
