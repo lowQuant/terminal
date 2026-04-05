@@ -2646,6 +2646,47 @@ body {
   color: var(--text-secondary);
 }
 
+/* ── EVTS Country Dropdown ── */
+.evts-country-select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius);
+  padding: 6px 28px 6px 10px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a8ca0'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  min-width: 180px;
+  transition: border-color 0.15s var(--ease);
+}
+
+.evts-country-select:hover {
+  border-color: var(--border-accent);
+}
+
+.evts-country-select:focus {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.evts-country-select option,
+.evts-country-select optgroup {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+.evts-country-select optgroup {
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
 /* ── Search Dropdown: function results variant ── */
 .search-result--function {
   background: linear-gradient(90deg, var(--accent-glow) 0%, transparent 60%);

@@ -11,7 +11,6 @@ const state = {
   currentTicker: 'AAPL',
   activeTab: 'home',
   activeFunction: null,             // non-null → a function view (ECO, EVTS, …) is active
-  ecoCountries: ['us'],             // ISO2 codes accepted by TradingView's events widget
   symbolLoaded: false,              // becomes true after the first ticker search
   recentSymbols: JSON.parse(localStorage.getItem('terminal_recent') || '[]'),
   companyInfo: null,
@@ -1041,8 +1040,7 @@ function injectTimeline(containerId) {
 // so we draw a static header bar above the iframe whose tracks
 // approximately align with the widget's internal columns.
 
-// ECO country list is fetched from the backend registry via
-// getEcoCountries() — no hardcoded list here.
+// ECO uses TradingView's built-in country filter — no custom filter needed.
 
 function renderEcoCalendar(container) {
   container.className = 'dashboard dashboard--function';
@@ -1058,21 +1056,7 @@ function renderEcoCalendar(container) {
         </div>
       </header>
 
-      <div class="function-toolbar">
-        <div class="function-toolbar__label">Countries</div>
-        <div class="country-filter" id="eco-country-filter"></div>
-        <div class="function-toolbar__actions">
-          <button class="country-btn country-btn--ghost" onclick="setEcoAllCountries()">All</button>
-          <button class="country-btn country-btn--ghost" onclick="setEcoMajorCountries()">G7</button>
-          <button class="country-btn country-btn--ghost" onclick="clearEcoCountries()">Clear</button>
-        </div>
-      </div>
-
       <div class="panel function-panel">
-        <!-- Column headers overlaid above the TV events widget.
-             Track widths (60/15/15/10) place the three numeric labels
-             at 60% / 75% / 90% of the table width — approximately
-             above the widget's Actual/Forecast/Prior columns. -->
         <div class="eco-widget-headers">
           <div></div>
           <div class="eco-widget-headers__col">Actual</div>
@@ -1084,61 +1068,10 @@ function renderEcoCalendar(container) {
     </div>
   `;
   setDataSource('TradingView');
-
-  // Fetch countries from registry then render filter + inject widget
-  getEcoCountries().then((countries) => {
-    renderEcoCountryFilter(countries);
-    injectEcoWidget();
-  });
-}
-
-function renderEcoCountryFilter(countries) {
-  const container = $('#eco-country-filter');
-  if (!container) return;
-  const list = countries || _ecoCountries || [];
-  container.innerHTML = list.map((c) => {
-    const active = state.ecoCountries.includes(c.code);
-    return `
-      <button class="country-btn ${active ? 'country-btn--active' : ''}"
-              onclick="toggleEcoCountry('${c.code}')"
-              title="${escHtml(c.label || c.name || '')}">
-        <span class="country-btn__flag">${c.flag}</span>
-        <span class="country-btn__code">${(c.code || '').toUpperCase()}</span>
-      </button>
-    `;
-  }).join('');
-}
-
-function toggleEcoCountry(code) {
-  const idx = state.ecoCountries.indexOf(code);
-  if (idx >= 0) state.ecoCountries.splice(idx, 1);
-  else state.ecoCountries.push(code);
-  renderEcoCountryFilter();
-  injectEcoWidget();
-}
-
-function setEcoAllCountries() {
-  state.ecoCountries = (_ecoCountries || []).map((c) => c.code);
-  renderEcoCountryFilter();
-  injectEcoWidget();
-}
-
-function setEcoMajorCountries() {
-  state.ecoCountries = ['us', 'eu', 'gb', 'de', 'fr', 'it', 'jp', 'ca'];
-  renderEcoCountryFilter();
-  injectEcoWidget();
-}
-
-function clearEcoCountries() {
-  state.ecoCountries = [];
-  renderEcoCountryFilter();
   injectEcoWidget();
 }
 
 function injectEcoWidget() {
-  const countryFilter = state.ecoCountries.length > 0
-    ? state.ecoCountries.join(',')
-    : 'us,eu,gb,de,fr,jp,cn,ca,au';   // sensible fallback if user clears all
   injectWidget('eco-widget-container',
     'https://s3.tradingview.com/external-embedding/embed-widget-events.js',
     {
@@ -1148,7 +1081,7 @@ function injectEcoWidget() {
       height: '100%',
       locale: 'en',
       importanceFilter: '-1,0,1',
-      countryFilter,
+      countryFilter: 'us,eu,gb,de,fr,it,es,ch,jp,cn,in,kr,au,nz,ca,mx,br,tr,za',
     }
   );
 }
@@ -1175,7 +1108,6 @@ const evtsState = {
 // Cached in state so we only fetch once per session.
 // Fallback to hardcoded US-only if the API call fails.
 let _scannerCountries = null;  // fetched from /api/countries/scanner
-let _ecoCountries = null;      // fetched from /api/countries/eco
 
 async function getScannerCountries() {
   if (_scannerCountries) return _scannerCountries;
@@ -1197,23 +1129,9 @@ async function getScannerCountries() {
   return _scannerCountries;
 }
 
-async function getEcoCountries() {
-  if (_ecoCountries) return _ecoCountries;
-  try {
-    const resp = await fetch('/api/countries/eco');
-    if (resp.ok) {
-      _ecoCountries = await resp.json();
-      return _ecoCountries;
-    }
-  } catch (e) { console.warn('Failed to fetch ECO countries:', e); }
-  _ecoCountries = [{ code: 'us', label: 'United States', flag: '🇺🇸' }];
-  return _ecoCountries;
-}
-
 function renderEventsCalendar(container) {
   container.className = 'dashboard dashboard--function';
 
-  // Render skeleton first, then populate countries once fetched
   container.innerHTML = `
     <div class="function-wrapper">
       <header class="function-header">
@@ -1228,22 +1146,21 @@ function renderEventsCalendar(container) {
 
       <div class="function-toolbar">
         <div class="function-toolbar__label">Country</div>
-        <div class="range-filter" id="evts-country-filter">
-          <span class="text-muted" style="font-size:11px">Loading countries…</span>
-        </div>
-      </div>
+        <select class="evts-country-select" id="evts-country-select">
+          <option value="US">🇺🇸 United States</option>
+        </select>
 
-      <div class="function-toolbar">
-        <div class="function-toolbar__label">Scope</div>
+        <div class="function-toolbar__label" style="margin-left:14px">Scope</div>
         <div class="range-filter" id="evts-scope-filter">
           <button class="country-btn country-btn--active" data-scope="all" id="evts-scope-all">All</button>
           <button class="country-btn" data-scope="watchlist">My Watchlist</button>
         </div>
+
         <div class="function-toolbar__label" style="margin-left:14px">Window</div>
         <div class="range-filter" id="evts-range-filter">
-          <button class="country-btn" data-range="7">Next 7 days</button>
-          <button class="country-btn country-btn--active" data-range="14">Next 14 days</button>
-          <button class="country-btn" data-range="30">Next 30 days</button>
+          <button class="country-btn" data-range="7">7d</button>
+          <button class="country-btn country-btn--active" data-range="14">14d</button>
+          <button class="country-btn" data-range="30">30d</button>
         </div>
         <div class="function-toolbar__actions">
           <button class="country-btn country-btn--ghost" onclick="reloadEvtsCalendar()">Refresh</button>
@@ -1261,7 +1178,7 @@ function renderEventsCalendar(container) {
     </div>
   `;
 
-  // Wire scope + range filters (static, don't depend on countries)
+  // Wire scope + range filters
   $$('#evts-scope-filter .country-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       $$('#evts-scope-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
@@ -1279,37 +1196,55 @@ function renderEventsCalendar(container) {
     });
   });
 
-  // Fetch countries from registry, then render the filter + load data
+  // Wire country dropdown change
+  const countrySelect = $('#evts-country-select');
+  if (countrySelect) {
+    countrySelect.addEventListener('change', () => {
+      evtsState.country = countrySelect.value;
+      updateEvtsScopeLabel();
+      loadEvtsCalendar();
+    });
+  }
+
+  // Populate country dropdown from registry, then load data
   getScannerCountries().then((countries) => {
-    renderEvtsCountryFilter(countries);
+    populateEvtsCountryDropdown(countries);
     updateEvtsScopeLabel();
     loadEvtsCalendar();
   });
 }
 
-function renderEvtsCountryFilter(countries) {
-  const container = $('#evts-country-filter');
-  if (!container) return;
-  container.innerHTML = countries.map((c) => {
-    const active = c.code === evtsState.country ? 'country-btn--active' : '';
-    return `
-      <button class="country-btn ${active}" data-evts-country="${c.code}">
-        <span class="country-btn__flag">${c.flag}</span>
-        <span class="country-btn__code">${escHtml(c.code)}</span>
-      </button>
-    `;
-  }).join('');
+function populateEvtsCountryDropdown(countries) {
+  const select = $('#evts-country-select');
+  if (!select) return;
 
-  // Wire click handlers
-  $$('#evts-country-filter .country-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      $$('#evts-country-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
-      btn.classList.add('country-btn--active');
-      evtsState.country = btn.dataset.evtsCountry;
-      updateEvtsScopeLabel();
-      loadEvtsCalendar();
-    });
+  // Group by region for a clean optgroup structure
+  const regions = {
+    americas:           'Americas',
+    europe:             'Europe',
+    asia_pacific:       'Asia Pacific',
+    middle_east_africa: 'Middle East & Africa',
+    other:              'Other',
+  };
+
+  const grouped = {};
+  countries.forEach((c) => {
+    const r = c.region || 'other';
+    (grouped[r] = grouped[r] || []).push(c);
   });
+
+  let html = '';
+  for (const [key, label] of Object.entries(regions)) {
+    const items = grouped[key];
+    if (!items || items.length === 0) continue;
+    html += `<optgroup label="${escHtml(label)}">`;
+    items.forEach((c) => {
+      const selected = c.code === evtsState.country ? 'selected' : '';
+      html += `<option value="${escHtml(c.code)}" ${selected}>${c.flag} ${escHtml(c.name)}</option>`;
+    });
+    html += `</optgroup>`;
+  }
+  select.innerHTML = html;
 }
 
 function updateEvtsScopeLabel() {
@@ -1372,8 +1307,9 @@ function renderEvtsTable() {
   }
 
   if (rows.length === 0) {
-    const country = EVTS_COUNTRIES.find((c) => c.code === evtsState.country);
-    const scopeLabel = country ? country.scopeAllLabel : 'this scope';
+    const countries = _scannerCountries || [];
+    const country = countries.find((c) => c.code === evtsState.country);
+    const scopeLabel = country ? country.name : evtsState.country;
     const msg = evtsState.scope === 'watchlist'
       ? 'No earnings in the window for tickers in your watchlist.'
       : `No earnings in the next ${evtsState.days} days for ${scopeLabel}.`;
