@@ -1299,7 +1299,7 @@ function updateEvtsScopeLabel() {
   if (sub && country) {
     sub.textContent = country.code === 'US'
       ? 'Upcoming earnings — full US market coverage (NASDAQ)'
-      : `Upcoming earnings — ${country.scopeAllLabel} (TradingView universe + yfinance)`;
+      : `Upcoming earnings — ${country.scopeAllLabel} (TradingView scanner)`;
   }
 }
 
