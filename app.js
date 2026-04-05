@@ -610,6 +610,19 @@ function loadSymbol(fullSymbol, tvSupported, companyName, yfExchange) {
     state.tvSupported = isTvSupported(state.currentExchange);
   }
 
+  // Route non-US stocks through yfinance + Lightweight Charts. TV's
+  // embed coverage for international equities is inconsistent (missing
+  // feeds, login walls, symbol mismatches), so we whitelist the
+  // exchanges where the TV chart reliably works and fall back to
+  // our own chart everywhere else.
+  const TV_CHART_EXCHANGES = [
+    'NASDAQ', 'NYSE', 'AMEX', 'NYSEARCA', 'OTC',
+    'BINANCE', 'COINBASE', 'BITSTAMP', 'FX_IDC', 'FOREXCOM',
+  ];
+  if (!TV_CHART_EXCHANGES.includes(tvPrefix)) {
+    state.tvSupported = false;
+  }
+
   // Clear cached data for new symbol
   state.companyInfo = null;
   state.newsData = null;
@@ -1178,10 +1191,10 @@ const evtsState = {
 // public API; EU/JP/HK use yfinance polled across the benchmark index
 // constituents (STOXX 50 + FTSE top / Nikkei 225 / Hang Seng).
 const EVTS_COUNTRIES = [
-  { code: 'US', label: 'United States',  flag: '🇺🇸', source: 'NASDAQ',        scopeAllLabel: 'All US Companies' },
-  { code: 'EU', label: 'Europe',         flag: '🇪🇺', source: 'Yahoo Finance', scopeAllLabel: 'STOXX Europe 600' },
-  { code: 'JP', label: 'Japan',          flag: '🇯🇵', source: 'Yahoo Finance', scopeAllLabel: 'Nikkei 225' },
-  { code: 'HK', label: 'Hong Kong',      flag: '🇭🇰', source: 'Yahoo Finance', scopeAllLabel: 'Hang Seng' },
+  { code: 'US', label: 'United States',  flag: '🇺🇸', scopeAllLabel: 'All US Companies' },
+  { code: 'EU', label: 'Europe',         flag: '🇪🇺', scopeAllLabel: 'Top 300 European' },
+  { code: 'JP', label: 'Japan',          flag: '🇯🇵', scopeAllLabel: 'Top 200 Japanese' },
+  { code: 'HK', label: 'Hong Kong',      flag: '🇭🇰', scopeAllLabel: 'Top 150 Hong Kong' },
 ];
 
 function renderEventsCalendar(container) {
@@ -1286,7 +1299,7 @@ function updateEvtsScopeLabel() {
   if (sub && country) {
     sub.textContent = country.code === 'US'
       ? 'Upcoming earnings — full US market coverage (NASDAQ)'
-      : `Upcoming earnings — ${country.scopeAllLabel} constituents (Yahoo Finance)`;
+      : `Upcoming earnings — ${country.scopeAllLabel} (TradingView universe + yfinance)`;
   }
 }
 
@@ -1375,8 +1388,10 @@ function renderEvtsTable() {
     const label = fmtEvtsDate(dateKey);
     html += `<div class="evts-table__date-row">${escHtml(label)} — ${dayRows.length} companies</div>`;
     dayRows.forEach((e) => {
-      // US → NASDAQ prefix. Non-US tickers come back as Yahoo symbols
-      // (e.g. "7203.T", "ASML.AS") — search resolver handles them.
+      // US rows (from NASDAQ API) have bare tickers → default to
+      // NASDAQ prefix. Non-US rows come from the TV scanner with a
+      // Yahoo ticker (e.g. "ASML.AS") — searchAndLoad resolves it via
+      // /api/search which returns the correct yfExchange internal key.
       const clickAction = evtsState.country === 'US'
         ? `loadSymbol('NASDAQ:${escHtml(e.ticker)}', true)`
         : `searchAndLoad('${escHtml(e.ticker)}')`;

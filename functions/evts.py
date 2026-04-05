@@ -1,20 +1,23 @@
 """EVTS — Corporate Events (Earnings Calendar).
 
-Data sources by region:
+Data sources
+============
 
-    US → NASDAQ's free public earnings API (no API key, full daily
-         market coverage — every US-listed company reporting each day).
+US
+    NASDAQ's free public earnings API. Returns every US-listed company
+    reporting on each requested day, no API key.
 
-    EU → yfinance Ticker.calendar polled in parallel across ~150 top
-         STOXX Europe 600 constituents (continent + UK).
+EU / JP / HK / … (any non-US region)
+    Universe is built dynamically from TradingView's scanner API
+    (``functions._tv_scanner``): we pull the top primary-listed stocks
+    per country sorted by market cap, then poll ``yfinance.Ticker.calendar``
+    across that universe in parallel. Scanner responses are cached
+    for 24h; earnings responses for 30min.
 
-    JP → yfinance across Nikkei 225 top names.
-
-    HK → yfinance across Hang Seng Index constituents.
-
-For truly exhaustive global coverage the upgrade path is a third-party
-provider with a worldwide feed (Finnhub / Financial Modeling Prep,
-both free API-key tiers).
+Each regional request merges several scanner countries (e.g. EU ⊂
+germany, france, netherlands, italy, spain, switzerland, belgium,
+denmark, sweden, finland, norway, uk), so adding a new country to a
+region is a one-line change.
 """
 
 import json
@@ -27,10 +30,55 @@ import yfinance as yf
 from flask import Blueprint, jsonify, request
 
 from functions._utils import cached
+from functions._tv_scanner import fetch_aggregated_universe, fetch_country_universe
 
 
 evts_bp = Blueprint('evts', __name__)
 
+
+# ═════════════════════════════════════════
+# Region configuration
+# ═════════════════════════════════════════
+#
+# Each EVTS country/region maps to a list of TradingView scanner
+# country slugs. ``US`` is special-cased to use the NASDAQ API for
+# full daily coverage; everything else is scanner-driven.
+
+REGIONS = {
+    'US': {
+        'nasdaq_api': True,
+        'countries':  ['america'],
+        'per_country': 250,
+        'total_cap':   250,
+    },
+    'EU': {
+        'nasdaq_api': False,
+        'countries':  [
+            'germany', 'france', 'netherlands', 'italy', 'spain',
+            'switzerland', 'belgium', 'denmark', 'sweden', 'finland',
+            'norway', 'uk', 'ireland', 'austria', 'portugal',
+        ],
+        'per_country': 50,
+        'total_cap':   300,
+    },
+    'JP': {
+        'nasdaq_api': False,
+        'countries':  ['japan'],
+        'per_country': 200,
+        'total_cap':   200,
+    },
+    'HK': {
+        'nasdaq_api': False,
+        'countries':  ['hongkong'],
+        'per_country': 150,
+        'total_cap':   150,
+    },
+}
+
+
+# ═════════════════════════════════════════
+# US path — NASDAQ public API
+# ═════════════════════════════════════════
 
 NASDAQ_UA = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
@@ -41,89 +89,6 @@ NASDAQ_UA = {
     'Referer': 'https://www.nasdaq.com/',
 }
 
-# ── Regional index-constituent universes (Yahoo Finance ticker format) ──
-
-# STOXX Europe 600 — top ~150 by market cap across Eurozone, UK,
-# Switzerland and Nordics. Covers all 11 ICB industries.
-EU_UNIVERSE = [
-    # Germany (DAX + MDAX leaders)
-    'SAP.DE', 'SIE.DE', 'ALV.DE', 'DTE.DE', 'MUV2.DE', 'AIR.PA',
-    'IFX.DE', 'DB1.DE', 'MBG.DE', 'BMW.DE', 'VOW3.DE', 'ADS.DE',
-    'BAS.DE', 'BAYN.DE', 'DHL.DE', 'HEN3.DE', 'MRK.DE', 'FRE.DE',
-    'FME.DE', 'RWE.DE', 'EOAN.DE', 'VNA.DE', 'CON.DE', 'HEI.DE',
-    'SY1.DE', 'SHL.DE', 'P911.DE', 'ENR.DE', 'BEI.DE', 'HNR1.DE',
-    # France (CAC 40 + SBF)
-    'MC.PA', 'OR.PA', 'TTE.PA', 'SAN.PA', 'SU.PA', 'AI.PA', 'EL.PA',
-    'BNP.PA', 'CS.PA', 'KER.PA', 'DG.PA', 'SGO.PA', 'CAP.PA', 'RI.PA',
-    'ACA.PA', 'GLE.PA', 'ORA.PA', 'HO.PA', 'LR.PA', 'SAF.PA', 'ML.PA',
-    'PUB.PA', 'DSY.PA', 'VIE.PA', 'CA.PA', 'RNO.PA', 'BN.PA',
-    # Netherlands
-    'ASML.AS', 'PRX.AS', 'INGA.AS', 'AD.AS', 'HEIA.AS', 'PHIA.AS',
-    'ADYEN.AS', 'WKL.AS', 'DSFIR.AS', 'EXO.AS', 'REN.AS',
-    # Italy (FTSE MIB)
-    'ENEL.MI', 'ENI.MI', 'ISP.MI', 'UCG.MI', 'STLAM.MI', 'G.MI',
-    'RACE.MI', 'MONC.MI', 'LDO.MI', 'STMMI.MI', 'CPR.MI', 'TRN.MI',
-    'PRY.MI', 'MB.MI', 'TIT.MI', 'UNI.MI',
-    # Spain (IBEX 35)
-    'IBE.MC', 'SAN.MC', 'BBVA.MC', 'ITX.MC', 'TEF.MC', 'REP.MC',
-    'FER.MC', 'AENA.MC', 'CABK.MC', 'ACS.MC', 'AMS.MC',
-    # Switzerland (SMI / SPI)
-    'NOVN.SW', 'ROG.SW', 'NESN.SW', 'UBSG.SW', 'ZURN.SW', 'ABBN.SW',
-    'CFR.SW', 'GIVN.SW', 'LONN.SW', 'SREN.SW', 'ALC.SW', 'SGSN.SW',
-    'SIKA.SW', 'GEBN.SW', 'UHR.SW', 'SCMN.SW', 'STMN.SW', 'KNIN.SW',
-    # Belgium / Luxembourg
-    'ABI.BR', 'KBC.BR', 'UCB.BR', 'SOLB.BR',
-    # Nordics (Denmark / Sweden / Finland / Norway)
-    'NOVO-B.CO', 'MAERSK-B.CO', 'DSV.CO', 'ORSTED.CO', 'CARL-B.CO',
-    'VWS.CO', 'NDA-DK.CO',
-    'VOLV-B.ST', 'ERIC-B.ST', 'HM-B.ST', 'ATCO-A.ST', 'INVE-B.ST',
-    'SAND.ST', 'SEB-A.ST', 'SHB-A.ST', 'EVO.ST', 'ASSA-B.ST',
-    'NOKIA.HE', 'UPM.HE', 'NESTE.HE', 'KNEBV.HE', 'FORTUM.HE',
-    'EQNR.OL', 'DNB.OL', 'TEL.OL',
-    # United Kingdom (FTSE 100)
-    'AZN.L', 'SHEL.L', 'HSBA.L', 'ULVR.L', 'GSK.L', 'RIO.L', 'DGE.L',
-    'BP.L', 'GLEN.L', 'REL.L', 'LSEG.L', 'BARC.L', 'LLOY.L', 'AAL.L',
-    'NG.L', 'ABF.L', 'VOD.L', 'IMB.L', 'BATS.L', 'TSCO.L', 'BA.L',
-    'NWG.L', 'STAN.L', 'PRU.L', 'LGEN.L', 'AV.L', 'EXPN.L', 'SSE.L',
-    'SGE.L', 'BT-A.L', 'CNA.L', 'MNDI.L', 'III.L', 'NXT.L', 'JD.L',
-    'ITRK.L', 'CRH.L', 'SMIN.L', 'WPP.L', 'RKT.L',
-]
-
-# Nikkei 225 top constituents
-JP_UNIVERSE = [
-    '7203.T', '6758.T', '6861.T', '8035.T', '9983.T', '9984.T', '6098.T',
-    '6367.T', '8306.T', '8316.T', '8411.T', '7974.T', '4063.T', '6501.T',
-    '9432.T', '9433.T', '9434.T', '6902.T', '6954.T', '6594.T', '7751.T',
-    '6752.T', '6702.T', '7267.T', '7269.T', '7201.T', '4502.T', '4503.T',
-    '7011.T', '8058.T', '8031.T', '8053.T', '8001.T', '4568.T', '4578.T',
-    '4519.T', '6273.T', '6981.T', '7741.T', '6971.T', '4901.T', '4452.T',
-    '9020.T', '9022.T', '9101.T', '9104.T', '9107.T', '5401.T', '5406.T',
-    '5020.T', '1605.T', '8802.T', '3382.T', '2914.T', '2502.T',
-]
-
-# Hang Seng Index constituents
-HK_UNIVERSE = [
-    '0700.HK', '9988.HK', '3690.HK', '1299.HK', '0005.HK', '0939.HK',
-    '1398.HK', '0388.HK', '0941.HK', '2318.HK', '0883.HK', '0386.HK',
-    '3988.HK', '2628.HK', '1288.HK', '0857.HK', '1810.HK', '9618.HK',
-    '1024.HK', '3968.HK', '1211.HK', '2333.HK', '0003.HK', '0011.HK',
-    '0016.HK', '0066.HK', '0017.HK', '0001.HK', '0002.HK', '0688.HK',
-    '0027.HK', '0175.HK', '0669.HK', '0267.HK', '0012.HK', '0823.HK',
-    '0101.HK', '1113.HK', '2388.HK', '1109.HK', '0316.HK', '0291.HK',
-    '0868.HK', '1093.HK', '1177.HK', '1928.HK', '2007.HK', '2382.HK',
-    '6098.HK', '6862.HK', '9633.HK', '9999.HK',
-]
-
-REGIONAL_UNIVERSES = {
-    'EU': EU_UNIVERSE,
-    'JP': JP_UNIVERSE,
-    'HK': HK_UNIVERSE,
-}
-
-
-# ═════════════════════════════════════════
-# NASDAQ money parser
-# ═════════════════════════════════════════
 
 def _parse_money(s):
     """Parse NASDAQ money strings like '$1,234.56', '$3.4M', '$(0.25)', 'N/A'."""
@@ -148,10 +113,6 @@ def _parse_money(s):
     except ValueError:
         return None
 
-
-# ═════════════════════════════════════════
-# US coverage — NASDAQ public API
-# ═════════════════════════════════════════
 
 def _fetch_nasdaq_earnings_day(d):
     """Fetch earnings for a single day from NASDAQ's public API."""
@@ -196,11 +157,40 @@ def _fetch_us_earnings(days):
 
 
 # ═════════════════════════════════════════
-# EU / JP / HK coverage — yfinance across index constituents
+# Non-US path — TV scanner universe + yfinance earnings
 # ═════════════════════════════════════════
 
-def _fetch_one_yf_earnings(ticker, country, cutoff_date):
-    """Pull the next upcoming earnings event for a single Yahoo ticker."""
+def _get_regional_universe(country_code):
+    """Fetch (and cache for 24h) the Yahoo-formatted ticker universe for a region."""
+    config = REGIONS.get(country_code)
+    if not config:
+        return []
+
+    def fetch():
+        if len(config['countries']) == 1:
+            rows = fetch_country_universe(
+                config['countries'][0],
+                top_n=config['per_country'],
+            )
+        else:
+            rows = fetch_aggregated_universe(
+                config['countries'],
+                per_country=config['per_country'],
+                total_cap=config['total_cap'],
+            )
+        return rows
+
+    try:
+        # 24h TTL — index constituents barely change day-to-day
+        return cached(f'tv_scanner_universe_{country_code}', fetch, ttl=86400)
+    except Exception as e:
+        print(f'[evts] scanner universe fetch failed for {country_code}: {e}')
+        return []
+
+
+def _fetch_one_yf_earnings(universe_entry, country, cutoff_date):
+    """Pull the next upcoming earnings event for a single scanner entry."""
+    ticker = universe_entry['yahoo_ticker']
     try:
         t = yf.Ticker(ticker)
         cal = t.calendar
@@ -212,16 +202,10 @@ def _fetch_one_yf_earnings(ticker, country, cutoff_date):
             return None
 
         today = date.today()
-        future_dates = [d for d in earnings_dates if isinstance(d, date) and today <= d <= cutoff_date]
-        if not future_dates:
+        future = [d for d in earnings_dates
+                  if isinstance(d, date) and today <= d <= cutoff_date]
+        if not future:
             return None
-        next_date = min(future_dates)
-
-        info = {}
-        try:
-            info = t.info or {}
-        except Exception:
-            pass
 
         def _num(k):
             v = cal.get(k)
@@ -234,6 +218,7 @@ def _fetch_one_yf_earnings(ticker, country, cutoff_date):
 
         last_year_eps = None
         try:
+            info = t.info or {}
             trailing = info.get('trailingEps')
             if trailing is not None:
                 last_year_eps = float(trailing)
@@ -241,12 +226,13 @@ def _fetch_one_yf_earnings(ticker, country, cutoff_date):
             pass
 
         return {
-            'date':           next_date.isoformat(),
+            'date':           min(future).isoformat(),
             'ticker':         ticker,
-            'name':           info.get('shortName') or info.get('longName') or ticker,
+            'tv_symbol':      universe_entry.get('tv_symbol'),
+            'name':           universe_entry.get('name') or ticker,
             'eps_estimate':   _num('Earnings Average'),
             'last_year_eps':  last_year_eps,
-            'market_cap':     info.get('marketCap'),
+            'market_cap':     universe_entry.get('market_cap'),
             'num_estimates':  None,
             'time':           '',
             'fiscal_quarter': '',
@@ -257,13 +243,14 @@ def _fetch_one_yf_earnings(ticker, country, cutoff_date):
 
 
 def _fetch_regional_earnings(country, days):
-    universe = REGIONAL_UNIVERSES.get(country)
+    universe = _get_regional_universe(country)
     if not universe:
         return []
     cutoff = date.today() + timedelta(days=days)
     results = []
     with ThreadPoolExecutor(max_workers=20) as ex:
-        futures = [ex.submit(_fetch_one_yf_earnings, t, country, cutoff) for t in universe]
+        futures = [ex.submit(_fetch_one_yf_earnings, entry, country, cutoff)
+                   for entry in universe]
         for f in futures:
             r = f.result()
             if r:
@@ -290,8 +277,12 @@ def earnings_calendar():
     days = max(1, min(days, 45))
     country = (request.args.get('country') or 'US').upper()
 
+    config = REGIONS.get(country)
+    if not config:
+        return jsonify({'error': f'Unsupported country: {country}'}), 400
+
     def fetch():
-        if country == 'US':
+        if config['nasdaq_api']:
             rows = _fetch_us_earnings(days)
         else:
             rows = _fetch_regional_earnings(country, days)
@@ -302,7 +293,7 @@ def earnings_calendar():
         data = cached(f'earnings_{country}_{days}', fetch, ttl=1800)   # 30-min cache
         return jsonify({
             'rows':    data,
-            'source':  'NASDAQ' if country == 'US' else 'Yahoo Finance',
+            'source':  'NASDAQ' if config['nasdaq_api'] else 'TradingView + yfinance',
             'country': country,
         })
     except Exception as e:
