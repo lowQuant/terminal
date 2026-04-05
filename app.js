@@ -11,7 +11,7 @@ const state = {
   currentTicker: 'AAPL',
   activeTab: 'home',
   activeFunction: null,             // non-null → a function view (ECO, EVTS, …) is active
-  ecoCountries: ['us'],             // selected countries for the Economic Calendar filter
+  ecoCountries: ['USD'],            // ForexFactory currency codes: USD, EUR, GBP, JPY, …
   symbolLoaded: false,              // becomes true after the first ticker search
   recentSymbols: JSON.parse(localStorage.getItem('terminal_recent') || '[]'),
   companyInfo: null,
@@ -1017,29 +1017,25 @@ function injectTimeline(containerId) {
 // ═══════════════════════════════════════
 // ECO — Economic Calendar
 // ═══════════════════════════════════════
+//
+// Data source: ForexFactory JSON feed (via /api/eco-calendar).
+// ForexFactory returns country as a currency code (USD, EUR, GBP, …).
+// We map those to displayable flags/labels below.
 
-// Countries offered in the filter. Codes match TradingView's event widget.
 const ECO_COUNTRIES = [
-  { code: 'us', label: 'United States', flag: '🇺🇸' },
-  { code: 'eu', label: 'Eurozone',      flag: '🇪🇺' },
-  { code: 'gb', label: 'United Kingdom',flag: '🇬🇧' },
-  { code: 'de', label: 'Germany',       flag: '🇩🇪' },
-  { code: 'fr', label: 'France',        flag: '🇫🇷' },
-  { code: 'it', label: 'Italy',         flag: '🇮🇹' },
-  { code: 'es', label: 'Spain',         flag: '🇪🇸' },
-  { code: 'ch', label: 'Switzerland',   flag: '🇨🇭' },
-  { code: 'jp', label: 'Japan',         flag: '🇯🇵' },
-  { code: 'cn', label: 'China',         flag: '🇨🇳' },
-  { code: 'in', label: 'India',         flag: '🇮🇳' },
-  { code: 'kr', label: 'South Korea',   flag: '🇰🇷' },
-  { code: 'au', label: 'Australia',     flag: '🇦🇺' },
-  { code: 'nz', label: 'New Zealand',   flag: '🇳🇿' },
-  { code: 'ca', label: 'Canada',        flag: '🇨🇦' },
-  { code: 'mx', label: 'Mexico',        flag: '🇲🇽' },
-  { code: 'br', label: 'Brazil',        flag: '🇧🇷' },
-  { code: 'tr', label: 'Turkey',        flag: '🇹🇷' },
-  { code: 'za', label: 'South Africa',  flag: '🇿🇦' },
+  { code: 'USD', label: 'United States',  flag: '🇺🇸' },
+  { code: 'EUR', label: 'Eurozone',       flag: '🇪🇺' },
+  { code: 'GBP', label: 'United Kingdom', flag: '🇬🇧' },
+  { code: 'JPY', label: 'Japan',          flag: '🇯🇵' },
+  { code: 'CHF', label: 'Switzerland',    flag: '🇨🇭' },
+  { code: 'CAD', label: 'Canada',         flag: '🇨🇦' },
+  { code: 'AUD', label: 'Australia',      flag: '🇦🇺' },
+  { code: 'NZD', label: 'New Zealand',    flag: '🇳🇿' },
+  { code: 'CNY', label: 'China',          flag: '🇨🇳' },
 ];
+
+// Raw data cache for the current fetch
+let _ecoData = null;
 
 function renderEcoCalendar(container) {
   container.className = 'dashboard dashboard--function';
@@ -1050,7 +1046,7 @@ function renderEcoCalendar(container) {
           <div class="function-header__code">ECO</div>
           <div class="function-header__name">
             <div class="function-header__name-main">Economic Calendar</div>
-            <div class="function-header__name-sub">Economic data releases &amp; events</div>
+            <div class="function-header__name-sub">Economic data releases — Actual · Forecast · Prior</div>
           </div>
         </div>
       </header>
@@ -1061,17 +1057,22 @@ function renderEcoCalendar(container) {
         <div class="function-toolbar__actions">
           <button class="country-btn country-btn--ghost" onclick="setEcoAllCountries()">All</button>
           <button class="country-btn country-btn--ghost" onclick="setEcoMajorCountries()">G7</button>
-          <button class="country-btn country-btn--ghost" onclick="clearEcoCountries()">Clear</button>
+          <button class="country-btn country-btn--ghost" onclick="reloadEcoCalendar()">Refresh</button>
         </div>
       </div>
 
       <div class="panel function-panel">
-        <div class="panel__body" id="eco-widget-container"></div>
+        <div class="panel__body" id="eco-table-container">
+          <div class="evts-loading">
+            <div class="search-loading__spinner"></div>
+            <span>Loading economic calendar…</span>
+          </div>
+        </div>
       </div>
     </div>
   `;
   renderEcoCountryFilter();
-  injectEcoWidget();
+  loadEcoCalendar();
 }
 
 function renderEcoCountryFilter() {
@@ -1084,7 +1085,7 @@ function renderEcoCountryFilter() {
               onclick="toggleEcoCountry('${c.code}')"
               title="${escHtml(c.label)}">
         <span class="country-btn__flag">${c.flag}</span>
-        <span class="country-btn__code">${c.code.toUpperCase()}</span>
+        <span class="country-btn__code">${escHtml(c.code)}</span>
       </button>
     `;
   }).join('');
@@ -1095,50 +1096,168 @@ function toggleEcoCountry(code) {
   if (idx >= 0) state.ecoCountries.splice(idx, 1);
   else state.ecoCountries.push(code);
   renderEcoCountryFilter();
-  injectEcoWidget();
+  renderEcoTable();
 }
 
 function setEcoAllCountries() {
   state.ecoCountries = ECO_COUNTRIES.map((c) => c.code);
   renderEcoCountryFilter();
-  injectEcoWidget();
+  renderEcoTable();
 }
 
 function setEcoMajorCountries() {
-  state.ecoCountries = ['us', 'eu', 'gb', 'de', 'fr', 'it', 'jp', 'ca'];
+  // G7 — USD, GBP, JPY, CAD, EUR covers DE/FR/IT
+  state.ecoCountries = ['USD', 'EUR', 'GBP', 'JPY', 'CAD'];
   renderEcoCountryFilter();
-  injectEcoWidget();
+  renderEcoTable();
 }
 
-function clearEcoCountries() {
-  state.ecoCountries = [];
-  renderEcoCountryFilter();
-  injectEcoWidget();
+function reloadEcoCalendar() {
+  _ecoData = null;
+  loadEcoCalendar();
 }
 
-function injectEcoWidget() {
-  const containerId = 'eco-widget-container';
-  const countryFilter = state.ecoCountries.length > 0
-    ? state.ecoCountries.join(',')
-    : 'us,eu,gb,de,fr,jp,cn,ca,au';   // sensible fallback if user clears all
-  injectWidget(containerId,
-    'https://s3.tradingview.com/external-embedding/embed-widget-events.js',
-    {
-      colorTheme: 'dark',
-      isTransparent: true,
-      width: '100%',
-      height: '100%',
-      locale: 'en',
-      importanceFilter: '-1,0,1',
-      countryFilter,
-    }
-  );
+async function loadEcoCalendar() {
+  const container = $('#eco-table-container');
+  if (!container) return;
+  container.innerHTML = `
+    <div class="evts-loading">
+      <div class="search-loading__spinner"></div>
+      <span>Loading economic calendar…</span>
+    </div>
+  `;
+
+  try {
+    const resp = await fetch('/api/eco-calendar');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    _ecoData = Array.isArray(data) ? data : [];
+    renderEcoTable();
+  } catch (err) {
+    console.error('Failed to load ECO calendar:', err);
+    container.innerHTML = `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">⚠</div>
+        <div>Could not load economic calendar.</div>
+        <div class="text-muted" style="font-size:11px;margin-top:8px;">${escHtml(err.message)}</div>
+        <button class="country-btn country-btn--ghost" style="margin-top:14px" onclick="reloadEcoCalendar()">Retry</button>
+      </div>
+    `;
+  }
+}
+
+function renderEcoTable() {
+  const container = $('#eco-table-container');
+  if (!container || !_ecoData) return;
+
+  const allowed = new Set(state.ecoCountries);
+  const rows = _ecoData.filter((e) => allowed.has(e.country));
+
+  if (rows.length === 0) {
+    container.innerHTML = `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">📅</div>
+        <div>No events match the selected countries.</div>
+      </div>
+    `;
+    return;
+  }
+
+  // Group by local date
+  const byDate = {};
+  rows.forEach((e) => {
+    const d = new Date(e.date);
+    if (isNaN(d)) return;
+    const key = d.toISOString().slice(0, 10);
+    (byDate[key] = byDate[key] || []).push({ ...e, _dt: d });
+  });
+  const sortedDates = Object.keys(byDate).sort();
+
+  let html = `
+    <div class="eco-table">
+      <div class="eco-table__header">
+        <div>Time</div>
+        <div>Country</div>
+        <div>Impact</div>
+        <div>Event</div>
+        <div class="eco-table__num">Actual</div>
+        <div class="eco-table__num">Forecast</div>
+        <div class="eco-table__num">Prior</div>
+      </div>
+  `;
+
+  sortedDates.forEach((dateKey) => {
+    const dayRows = byDate[dateKey].sort((a, b) => a._dt - b._dt);
+    const label = new Date(dateKey + 'T00:00:00').toLocaleDateString('en-US', {
+      weekday: 'long', month: 'short', day: 'numeric'
+    });
+    html += `<div class="eco-table__date-row">${escHtml(label)} — ${dayRows.length} events</div>`;
+
+    dayRows.forEach((e) => {
+      const country = ECO_COUNTRIES.find((c) => c.code === e.country);
+      const flag = country ? country.flag : '';
+      const timeStr = e._dt.toLocaleTimeString('en-US', {
+        hour: '2-digit', minute: '2-digit', hour12: false
+      });
+
+      const impact = (e.impact || '').toLowerCase();
+      const impactClass = {
+        high: 'impact--high',
+        medium: 'impact--medium',
+        low: 'impact--low',
+        holiday: 'impact--holiday',
+      }[impact] || 'impact--low';
+
+      // Surprise colouring: actual vs forecast
+      let actualClass = '';
+      const aNum = parseFloat((e.actual || '').replace(/[^\-0-9.]/g, ''));
+      const fNum = parseFloat((e.forecast || '').replace(/[^\-0-9.]/g, ''));
+      if (!isNaN(aNum) && !isNaN(fNum)) {
+        actualClass = aNum > fNum ? 'eco-table__num--positive' : aNum < fNum ? 'eco-table__num--negative' : '';
+      }
+
+      html += `
+        <div class="eco-table__row">
+          <div class="eco-table__time">${escHtml(timeStr)}</div>
+          <div class="eco-table__country">
+            <span class="eco-table__flag">${flag}</span>
+            <span class="eco-table__ccy">${escHtml(e.country)}</span>
+          </div>
+          <div class="eco-table__impact">
+            <span class="impact-dot ${impactClass}" title="${escHtml(e.impact || '')}"></span>
+            <span class="impact-label">${escHtml(e.impact || '')}</span>
+          </div>
+          <div class="eco-table__title">${escHtml(e.title || '')}</div>
+          <div class="eco-table__num ${actualClass}">${escHtml(e.actual || '—')}</div>
+          <div class="eco-table__num">${escHtml(e.forecast || '—')}</div>
+          <div class="eco-table__num">${escHtml(e.previous || '—')}</div>
+        </div>
+      `;
+    });
+  });
+
+  html += `</div>`;
+  container.innerHTML = html;
 }
 
 
 // ═══════════════════════════════════════
 // EVTS — Corporate Events (Earnings Calendar)
 // ═══════════════════════════════════════
+//
+// Data source: NASDAQ's public earnings calendar API — all US-listed
+// companies reporting each day (no curated universe, no API key).
+// Currently US-only; other regions are surfaced as "coming soon"
+// placeholder buttons to keep the UI honest.
+
+let _evtsData = null;
+
+const evtsState = {
+  days: 14,
+  scope: 'all',          // 'all' | 'watchlist'
+  country: 'US',         // only 'US' is implemented right now
+};
 
 function renderEventsCalendar(container) {
   container.className = 'dashboard dashboard--function';
@@ -1149,13 +1268,36 @@ function renderEventsCalendar(container) {
           <div class="function-header__code">EVTS</div>
           <div class="function-header__name">
             <div class="function-header__name-main">Corporate Events</div>
-            <div class="function-header__name-sub">Upcoming earnings from top global tickers</div>
+            <div class="function-header__name-sub">Upcoming earnings — full US market coverage (NASDAQ API)</div>
           </div>
         </div>
       </header>
 
       <div class="function-toolbar">
-        <div class="function-toolbar__label">Window</div>
+        <div class="function-toolbar__label">Country</div>
+        <div class="range-filter">
+          <button class="country-btn country-btn--active" data-evts-country="US">
+            <span class="country-btn__flag">🇺🇸</span><span class="country-btn__code">US</span>
+          </button>
+          <button class="country-btn" disabled title="Coming soon">
+            <span class="country-btn__flag">🇪🇺</span><span class="country-btn__code">EU</span>
+          </button>
+          <button class="country-btn" disabled title="Coming soon">
+            <span class="country-btn__flag">🇬🇧</span><span class="country-btn__code">GB</span>
+          </button>
+          <button class="country-btn" disabled title="Coming soon">
+            <span class="country-btn__flag">🇯🇵</span><span class="country-btn__code">JP</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="function-toolbar">
+        <div class="function-toolbar__label">Scope</div>
+        <div class="range-filter" id="evts-scope-filter">
+          <button class="country-btn country-btn--active" data-scope="all">All US Companies</button>
+          <button class="country-btn" data-scope="watchlist">My Watchlist</button>
+        </div>
+        <div class="function-toolbar__label" style="margin-left:14px">Window</div>
         <div class="range-filter" id="evts-range-filter">
           <button class="country-btn" data-range="7">Next 7 days</button>
           <button class="country-btn country-btn--active" data-range="14">Next 14 days</button>
@@ -1177,19 +1319,30 @@ function renderEventsCalendar(container) {
     </div>
   `;
 
-  // Wire the range filter
+  // Wire scope filter (client-side)
+  $$('#evts-scope-filter .country-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('#evts-scope-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
+      btn.classList.add('country-btn--active');
+      evtsState.scope = btn.dataset.scope;
+      renderEvtsTable();
+    });
+  });
+
+  // Wire range filter (triggers refetch)
   $$('#evts-range-filter .country-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       $$('#evts-range-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
       btn.classList.add('country-btn--active');
-      loadEvtsCalendar(parseInt(btn.dataset.range));
+      evtsState.days = parseInt(btn.dataset.range);
+      loadEvtsCalendar();
     });
   });
 
-  loadEvtsCalendar(14);
+  loadEvtsCalendar();
 }
 
-async function loadEvtsCalendar(days) {
+async function loadEvtsCalendar() {
   const container = $('#evts-table-container');
   if (!container) return;
   container.innerHTML = `
@@ -1200,60 +1353,12 @@ async function loadEvtsCalendar(days) {
   `;
 
   try {
-    const resp = await fetch(`/api/earnings-calendar?days=${days}`);
+    const resp = await fetch(`/api/earnings-calendar?days=${evtsState.days}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-
-    if (!Array.isArray(data) || data.length === 0) {
-      container.innerHTML = `
-        <div class="evts-empty">
-          <div class="evts-empty__icon">📅</div>
-          <div>No earnings scheduled in the next ${days} days.</div>
-        </div>
-      `;
-      return;
-    }
-
-    // Group by date
-    const byDate = {};
-    data.forEach((e) => {
-      const d = e.date;
-      if (!byDate[d]) byDate[d] = [];
-      byDate[d].push(e);
-    });
-    const sortedDates = Object.keys(byDate).sort();
-
-    let html = `
-      <div class="evts-table">
-        <div class="evts-table__header">
-          <div>Date</div>
-          <div>Ticker</div>
-          <div>Company</div>
-          <div class="evts-table__num">EPS Est.</div>
-          <div class="evts-table__num">Rev. Est.</div>
-          <div class="evts-table__num">Mkt Cap</div>
-        </div>
-    `;
-
-    sortedDates.forEach((date) => {
-      const rows = byDate[date];
-      const label = fmtEvtsDate(date);
-      html += `<div class="evts-table__date-row">${escHtml(label)} — ${rows.length} companies</div>`;
-      rows.forEach((e) => {
-        html += `
-          <div class="evts-table__row" onclick="loadSymbol('${escHtml(e.tv_symbol || 'NASDAQ:' + e.ticker)}', true)">
-            <div class="evts-table__date">${escHtml(fmtEvtsShortDate(date))}</div>
-            <div class="evts-table__ticker">${escHtml(e.ticker)}</div>
-            <div class="evts-table__name">${escHtml(e.name || '')}</div>
-            <div class="evts-table__num">${e.eps_estimate != null ? Number(e.eps_estimate).toFixed(2) : '—'}</div>
-            <div class="evts-table__num">${e.revenue_estimate != null ? fmtBigNum(e.revenue_estimate) : '—'}</div>
-            <div class="evts-table__num">${e.market_cap != null ? fmtBigNum(e.market_cap) : '—'}</div>
-          </div>
-        `;
-      });
-    });
-    html += `</div>`;
-    container.innerHTML = html;
+    if (data.error) throw new Error(data.error);
+    _evtsData = Array.isArray(data) ? data : [];
+    renderEvtsTable();
   } catch (err) {
     console.error('Failed to load earnings calendar:', err);
     container.innerHTML = `
@@ -1261,15 +1366,91 @@ async function loadEvtsCalendar(days) {
         <div class="evts-empty__icon">⚠</div>
         <div>Could not load earnings calendar.</div>
         <div class="text-muted" style="font-size:11px;margin-top:8px;">${escHtml(err.message)}</div>
+        <button class="country-btn country-btn--ghost" style="margin-top:14px" onclick="reloadEvtsCalendar()">Retry</button>
       </div>
     `;
   }
 }
 
+function renderEvtsTable() {
+  const container = $('#evts-table-container');
+  if (!container || !_evtsData) return;
+
+  // Apply scope filter
+  let rows = _evtsData;
+  if (evtsState.scope === 'watchlist') {
+    const wlSet = new Set(state.watchlist.map((w) => w.symbol.toUpperCase()));
+    rows = rows.filter((e) => wlSet.has((e.ticker || '').toUpperCase()));
+  }
+
+  if (rows.length === 0) {
+    const msg = evtsState.scope === 'watchlist'
+      ? 'No earnings in the window for tickers in your watchlist.'
+      : `No earnings scheduled in the next ${evtsState.days} days.`;
+    container.innerHTML = `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">📅</div>
+        <div>${escHtml(msg)}</div>
+      </div>
+    `;
+    return;
+  }
+
+  // Group by date
+  const byDate = {};
+  rows.forEach((e) => {
+    (byDate[e.date] = byDate[e.date] || []).push(e);
+  });
+  const sortedDates = Object.keys(byDate).sort();
+
+  let html = `
+    <div class="evts-table">
+      <div class="evts-table__header">
+        <div>Date</div>
+        <div>Time</div>
+        <div>Ticker</div>
+        <div>Company</div>
+        <div class="evts-table__num">EPS Est.</div>
+        <div class="evts-table__num">Last Yr</div>
+        <div class="evts-table__num">Mkt Cap</div>
+      </div>
+  `;
+
+  sortedDates.forEach((dateKey) => {
+    const dayRows = byDate[dateKey];
+    const label = fmtEvtsDate(dateKey);
+    html += `<div class="evts-table__date-row">${escHtml(label)} — ${dayRows.length} companies</div>`;
+    dayRows.forEach((e) => {
+      html += `
+        <div class="evts-table__row" onclick="loadSymbol('NASDAQ:${escHtml(e.ticker)}', true)">
+          <div class="evts-table__date">${escHtml(fmtEvtsShortDate(dateKey))}</div>
+          <div class="evts-table__time">${escHtml(fmtEvtsTime(e.time))}</div>
+          <div class="evts-table__ticker">${escHtml(e.ticker)}</div>
+          <div class="evts-table__name">${escHtml(e.name || '')}</div>
+          <div class="evts-table__num">${e.eps_estimate != null ? '$' + Number(e.eps_estimate).toFixed(2) : '—'}</div>
+          <div class="evts-table__num">${e.last_year_eps != null ? '$' + Number(e.last_year_eps).toFixed(2) : '—'}</div>
+          <div class="evts-table__num">${e.market_cap != null ? '$' + fmtBigNum(e.market_cap) : '—'}</div>
+        </div>
+      `;
+    });
+  });
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
 function reloadEvtsCalendar() {
-  const activeBtn = $('#evts-range-filter .country-btn--active');
-  const days = activeBtn ? parseInt(activeBtn.dataset.range) : 14;
-  loadEvtsCalendar(days);
+  _evtsData = null;
+  loadEvtsCalendar();
+}
+
+function fmtEvtsTime(t) {
+  if (!t) return '—';
+  const map = {
+    'time-pre-market':    'BMO',    // Before Market Open
+    'time-after-hours':   'AMC',    // After Market Close
+    'time-not-supplied':  '—',
+  };
+  return map[t] || t;
 }
 
 function fmtEvtsDate(iso) {

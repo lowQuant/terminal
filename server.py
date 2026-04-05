@@ -8,6 +8,9 @@ from flask import Flask, jsonify, request, send_from_directory
 import yfinance as yf
 import time
 import traceback
+import urllib.request
+import urllib.error
+import json
 from datetime import datetime, date, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from exchange_map import (
@@ -478,113 +481,166 @@ def get_article():
 
 
 # ═══════════════════════════════════════
-# EVTS — EARNINGS CALENDAR API
+# ECO — ECONOMIC CALENDAR API
 # ═══════════════════════════════════════
+#
+# ECO uses the free ForexFactory JSON feed which includes title, country
+# (as currency code), impact rating, and – crucially – the Actual /
+# Forecast / Previous columns the embedded TradingView widget lacks.
+# No API key, no scraping.
 
-# Curated universe of heavyweight global tickers. yfinance doesn't expose a
-# market-wide earnings calendar, so EVTS polls `Ticker.calendar` in parallel
-# across this list and surfaces those with an upcoming earnings date.
-# Picked for broad sector & mega-cap coverage; add/remove freely.
-EARNINGS_UNIVERSE = [
-    # Mega-cap tech
-    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AVGO',
-    'ORCL', 'ADBE', 'CRM', 'NFLX', 'AMD', 'INTC', 'CSCO', 'QCOM', 'IBM',
-    'TXN', 'INTU', 'NOW', 'PLTR', 'UBER', 'SHOP', 'PYPL', 'SQ',
-    # Financials
-    'JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'BLK', 'SCHW', 'V', 'MA',
-    'AXP', 'BRK-B',
-    # Healthcare / Pharma
-    'UNH', 'JNJ', 'LLY', 'PFE', 'MRK', 'ABBV', 'TMO', 'ABT', 'DHR',
-    'BMY', 'AMGN', 'GILD',
-    # Consumer
-    'WMT', 'COST', 'HD', 'MCD', 'NKE', 'SBUX', 'TGT', 'LOW', 'DIS',
-    'PG', 'KO', 'PEP', 'PM', 'MO',
-    # Energy & Industrials
-    'XOM', 'CVX', 'COP', 'SLB', 'OXY', 'BA', 'CAT', 'GE', 'HON',
-    'LMT', 'RTX', 'DE', 'UPS', 'FDX',
-    # Autos & Semis
-    'F', 'GM', 'MU', 'LRCX', 'AMAT', 'ASML',
-    # Media / Comms
-    'T', 'VZ', 'CMCSA', 'TMUS',
-    # High-profile growth / secondary names
-    'COIN', 'SNOW', 'DDOG', 'CRWD', 'ZS', 'PANW', 'NET', 'MDB',
-    'ROKU', 'SPOT', 'ABNB', 'DASH', 'RIVN', 'LCID',
+FF_URLS = [
+    'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
+    'https://nfs.faireconomy.media/ff_calendar_nextweek.json',
 ]
 
 
-def _fetch_one_earnings(ticker):
-    """Pull the next upcoming earnings event for a single ticker."""
-    try:
-        t = yf.Ticker(ticker)
-        cal = t.calendar
-        if not cal or not isinstance(cal, dict):
-            return None
+def _fetch_json(url, timeout=15):
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                      'AppleWebKit/537.36 (KHTML, like Gecko) '
+                      'Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = resp.read()
+    return json.loads(body.decode('utf-8'))
 
-        earnings_dates = cal.get('Earnings Date') or []
-        if not earnings_dates:
-            return None
 
-        # Pick the earliest future date
-        today = date.today()
-        future_dates = [d for d in earnings_dates if isinstance(d, date) and d >= today]
-        if not future_dates:
-            return None
-        next_date = min(future_dates)
-
-        # Fundamentals (short call for name / market cap)
-        info = {}
-        try:
-            info = t.info or {}
-        except Exception:
-            pass
-
-        def _num(key):
-            v = cal.get(key)
-            if v is None:
-                return None
+@app.route('/api/eco-calendar')
+def eco_calendar():
+    """Aggregate this-week + next-week economic events from ForexFactory."""
+    def fetch():
+        events = []
+        for url in FF_URLS:
             try:
-                return float(v)
-            except (TypeError, ValueError):
-                return None
+                data = _fetch_json(url)
+                if isinstance(data, list):
+                    events.extend(data)
+            except Exception as e:
+                print(f'[eco-calendar] {url} failed: {e}')
+        # Normalise — pass through most fields, ensure keys exist
+        out = []
+        for ev in events:
+            if not isinstance(ev, dict):
+                continue
+            out.append({
+                'title':    ev.get('title', ''),
+                'country':  ev.get('country', ''),      # currency code: USD, EUR, …
+                'date':     ev.get('date', ''),         # ISO datetime with TZ
+                'impact':   ev.get('impact', ''),       # Low / Medium / High / Holiday
+                'forecast': ev.get('forecast', ''),
+                'previous': ev.get('previous', ''),
+                'actual':   ev.get('actual', ''),
+            })
+        # Sort by date ascending
+        out.sort(key=lambda x: x.get('date') or '')
+        return out
 
-        return {
-            'ticker':           ticker,
-            'name':             info.get('shortName') or info.get('longName') or ticker,
-            'date':             next_date.isoformat(),
-            'eps_estimate':     _num('Earnings Average'),
-            'eps_high':         _num('Earnings High'),
-            'eps_low':          _num('Earnings Low'),
-            'revenue_estimate': _num('Revenue Average'),
-            'market_cap':       info.get('marketCap'),
-            'tv_symbol':        f'NASDAQ:{ticker}' if info.get('exchange', '').upper() in ('NMS', 'NGM', 'NCM') else f'NYSE:{ticker}',
-        }
-    except Exception:
+    try:
+        data = cached('eco_calendar', fetch, ttl=900)   # 15-min cache
+        return jsonify(data)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════
+# EVTS — EARNINGS CALENDAR API
+# ═══════════════════════════════════════
+#
+# EVTS uses NASDAQ's free public earnings API (no key) which returns the
+# full daily earnings calendar — all US-listed companies reporting on a
+# given date. We parallelise per-day calls over the requested window.
+
+NASDAQ_UA = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                  'AppleWebKit/537.36 (KHTML, like Gecko) '
+                  'Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Origin': 'https://www.nasdaq.com',
+    'Referer': 'https://www.nasdaq.com/',
+}
+
+
+def _parse_money(s):
+    """Parse NASDAQ money strings like '$1,234.56', '$3.4M', '$(0.25)', 'N/A'."""
+    if s is None:
         return None
+    s = str(s).strip()
+    if not s or s.upper() in ('N/A', 'NA', '--', '-'):
+        return None
+    negative = s.startswith('(') and s.endswith(')')
+    s = s.replace('(', '').replace(')', '')
+    s = s.replace('$', '').replace(',', '').replace(' ', '')
+    if not s:
+        return None
+    multiplier = 1
+    last = s[-1].upper()
+    if last in 'KMBT':
+        multiplier = {'K': 1e3, 'M': 1e6, 'B': 1e9, 'T': 1e12}[last]
+        s = s[:-1]
+    try:
+        val = float(s) * multiplier
+        return -val if negative else val
+    except ValueError:
+        return None
+
+
+def _fetch_nasdaq_earnings_day(d):
+    """Fetch earnings for a single day from NASDAQ's public API."""
+    url = f'https://api.nasdaq.com/api/calendar/earnings?date={d.isoformat()}'
+    try:
+        req = urllib.request.Request(url, headers=NASDAQ_UA)
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+    except Exception as e:
+        print(f'[earnings-calendar] {d} failed: {e}')
+        return []
+
+    rows = (payload.get('data') or {}).get('rows') or []
+    out = []
+    for row in rows:
+        symbol = (row.get('symbol') or '').strip()
+        if not symbol:
+            continue
+        out.append({
+            'date':           d.isoformat(),
+            'ticker':         symbol,
+            'name':           (row.get('name') or '').strip(),
+            'eps_estimate':   _parse_money(row.get('epsForecast')),
+            'last_year_eps':  _parse_money(row.get('lastYearEPS')),
+            'market_cap':     _parse_money(row.get('marketCap')),
+            'num_estimates':  row.get('noOfEsts'),
+            'time':           row.get('time', ''),                  # time-pre-market | time-after-hours | time-not-supplied
+            'fiscal_quarter': row.get('fiscalQuarterEnding', ''),
+            'country':        'US',
+        })
+    return out
 
 
 @app.route('/api/earnings-calendar')
 def earnings_calendar():
-    """Return upcoming earnings for the curated universe within `days`."""
+    """Return all US earnings in the next `days` (1-45) via NASDAQ's API."""
     try:
         days = int(request.args.get('days', 14))
     except ValueError:
         days = 14
-    days = max(1, min(days, 60))
-
-    cutoff = date.today() + timedelta(days=days)
+    days = max(1, min(days, 45))
 
     def fetch():
-        results = []
-        # Parallelize yfinance lookups — they're IO-bound
-        with ThreadPoolExecutor(max_workers=16) as ex:
-            for r in ex.map(_fetch_one_earnings, EARNINGS_UNIVERSE):
-                if r and r['date'] <= cutoff.isoformat():
-                    results.append(r)
-        results.sort(key=lambda x: (x['date'], x['ticker']))
-        return results
+        today = date.today()
+        dates = [today + timedelta(days=i) for i in range(days)]
+        all_rows = []
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            for day_rows in ex.map(_fetch_nasdaq_earnings_day, dates):
+                all_rows.extend(day_rows)
+        # Sort by (date, market cap desc) so megacaps surface first within each day
+        all_rows.sort(key=lambda r: (r['date'], -(r['market_cap'] or 0), r['ticker']))
+        return all_rows
 
     try:
-        data = cached(f'earnings_{days}', fetch, ttl=1800)  # 30-min cache
+        data = cached(f'earnings_nasdaq_{days}', fetch, ttl=1800)   # 30-min cache
         return jsonify(data)
     except Exception as e:
         traceback.print_exc()
