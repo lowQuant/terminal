@@ -779,7 +779,7 @@ function injectMarketOverview(containerId) {
             { s: 'INDEX:NKY',       d: 'Nikkei 225' },
             { s: 'INDEX:HSI',       d: 'Hang Seng' },
             { s: 'BMFBOVESPA:IBOV', d: 'Ibovespa' },
-            { s: 'TVC:VIX',         d: 'VIX' },
+            { s: 'CAPITALCOM:VIX',  d: 'VIX' },
           ],
           originalTitle: 'Indices',
         },

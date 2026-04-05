@@ -2213,11 +2213,15 @@ body {
 }
 
 /* ── Market Grid (2-column: Global Markets + Top News) ── */
+/* NOTE: the row must be a FIXED track — TradingView iframe widgets
+   report an intrinsic height that, combined with `auto`, would cause
+   the grid row to grow past the viewport and overlap siblings below. */
 .home-grid {
   display: grid;
   gap: 16px;
   grid-template-columns: 1.7fr 1fr;
-  grid-template-rows: minmax(640px, auto);
+  grid-template-rows: 640px;
+  min-height: 0;
 }
 
 .home-panel {
