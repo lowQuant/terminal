@@ -564,7 +564,7 @@ function selectSearchResult(index) {
   const r = state.searchResults[index];
   if (!r) return;
 
-  loadSymbol(r.tvSymbol, r.tvSupported, r.name);
+  loadSymbol(r.tvSymbol, r.tvSupported, r.name, r.yfExchange);
 
   // Clear search
   const input = $('#ticker-input');
@@ -594,11 +594,14 @@ function renderRecentDropdown() {
 // SYMBOL LOADING
 // ═══════════════════════════════════════
 
-function loadSymbol(fullSymbol, tvSupported, companyName) {
+function loadSymbol(fullSymbol, tvSupported, companyName, yfExchange) {
   const parts = fullSymbol.split(':');
-  state.currentExchange = parts.length > 1 ? parts[0] : 'NASDAQ';
+  const tvPrefix = parts.length > 1 ? parts[0] : 'NASDAQ';
   state.currentTicker = parts.length > 1 ? parts[1] : parts[0];
-  state.currentSymbol = `${state.currentExchange}:${state.currentTicker}`;
+  state.currentSymbol = `${tvPrefix}:${state.currentTicker}`;
+  // currentExchange is the INTERNAL key used for backend API calls
+  // (may differ from the TV prefix — e.g. EURONEXT_AMS for ASML.AS).
+  state.currentExchange = yfExchange || tvPrefix;
 
   // Determine TV support
   if (tvSupported !== undefined) {
@@ -636,7 +639,9 @@ function loadSymbol(fullSymbol, tvSupported, companyName) {
 
 function updateSymbolBar(companyName) {
   $('#symbol-ticker').textContent = state.currentTicker;
-  $('#symbol-exchange').textContent = state.currentExchange;
+  // Show the TV prefix in the symbol bar (cleaner than the internal
+  // key — e.g. "EURONEXT" instead of "EURONEXT_AMS").
+  $('#symbol-exchange').textContent = state.currentSymbol.split(':')[0];
 
   if (companyName) {
     $('#symbol-name').textContent = companyName;
@@ -1408,7 +1413,7 @@ async function searchAndLoad(ticker) {
         (r) => r.symbol === ticker || r.ticker === ticker
       );
       if (match) {
-        loadSymbol(match.tvSymbol, match.tvSupported, match.name);
+        loadSymbol(match.tvSymbol, match.tvSupported, match.name, match.yfExchange);
         return;
       }
     }

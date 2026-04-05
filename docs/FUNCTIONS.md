@@ -192,27 +192,52 @@ Function views should:
 Reference implementation: see `renderEcoCalendar` and
 `renderEventsCalendar` in `app.js`.
 
-### 4. Backend endpoint (if needed)
+### 4. Backend module (if needed)
 
-If the function needs server-side data, add a new route in
-`server.py` following the existing pattern:
+If the function needs server-side data, create a new module in the
+`functions/` package — **do NOT** add routes directly to `server.py`.
+Each function module exposes a Flask **Blueprint** that `server.py`
+registers automatically.
+
+Create `functions/mov.py`:
 
 ```python
-@app.route('/api/my-function')
-def my_function():
+"""MOV — Top Movers."""
+from flask import Blueprint, jsonify, request
+from functions._utils import cached
+
+mov_bp = Blueprint('mov', __name__)
+
+
+@mov_bp.route('/api/top-movers')
+def top_movers():
     def fetch():
         # ... call external API / yfinance, transform data
         return rows
 
     try:
-        data = cached('my_function_key', fetch, ttl=300)
+        data = cached('top_movers', fetch, ttl=300)
         return jsonify({'rows': data, 'source': 'MyProvider'})
     except Exception as e:
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 ```
 
-Use the `cached(key, fetch_fn, ttl)` helper for in-memory caching.
+Then append it to `functions/__init__.py`:
+
+```python
+from functions.mov import mov_bp
+
+ALL_BLUEPRINTS = [
+    evts_bp,
+    mov_bp,   # new
+]
+```
+
+`server.py` iterates `ALL_BLUEPRINTS` at startup and registers each
+one, so no further wiring is needed.
+
+Use the shared `cached(key, fetch_fn, ttl)` helper from
+`functions._utils` for in-memory TTL caching.
 
 ### 5. Add styles
 
@@ -241,11 +266,30 @@ controls, and any notable design decisions.
 
 ## File Map
 
+### Frontend
 | File | Responsibility |
 |---|---|
 | `app.js` — `FUNCTIONS` array | Registry of all function codes and metadata |
 | `app.js` — `openFunction()` | Entry point; hides stock UI, dispatches to renderer |
 | `app.js` — `renderEcoCalendar`, `renderEventsCalendar`, … | Per-function view renderers |
 | `app.js` — `setDataSource()` | Updates the status-bar attribution |
-| `server.py` — `/api/earnings-calendar` | EVTS backend (NASDAQ + yfinance) |
 | `styles.css` — `FUNCTION VIEWS` section | Shared function layout styling |
+
+### Backend
+```
+server.py                 # Slim: static files + stock/search/info/news/history/article
+exchange_map.py           # Yahoo ↔ TradingView ↔ yfinance symbol resolution
+functions/
+├── __init__.py           # ALL_BLUEPRINTS list — registered by server.py
+├── _utils.py             # cached() helper, shared CACHE_TTL constants
+└── evts.py               # EVTS Blueprint: NASDAQ API + yfinance regional universes
+```
+
+Each function that needs backend data gets its own module in
+`functions/`. `server.py` stays thin — it imports `ALL_BLUEPRINTS`
+from the package and registers every blueprint at startup. Adding
+a new function's backend is a matter of dropping `functions/<code>.py`
+and appending its blueprint to `ALL_BLUEPRINTS`.
+
+ECO has no backend module because it uses TradingView's
+`embed-widget-events` client-side.

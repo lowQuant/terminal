@@ -49,7 +49,12 @@ EXCHANGE_MAP = {
     'EURONEXT': {'yfinance': '.PA',  'tv_embed': True,  'label': 'Euronext Paris'},
 
     # ── Netherlands ──
-    'EURONEXT_AMS': {'yfinance': '.AS', 'tv_embed': True, 'label': 'Euronext Amsterdam'},
+    # TradingView uses the unified "EURONEXT" prefix for all Euronext
+    # listings (Amsterdam, Paris, Brussels, Lisbon), but we need a
+    # distinct internal key so that .AS yfinance tickers don't collide
+    # with .PA. tv_prefix overrides the map-key when building the
+    # TradingView full symbol.
+    'EURONEXT_AMS': {'yfinance': '.AS', 'tv_embed': True, 'tv_prefix': 'EURONEXT', 'label': 'Euronext Amsterdam'},
 
     # ── Hong Kong ──
     'HKEX':     {'yfinance': '.HK',  'tv_embed': False, 'label': 'Hong Kong Exchange'},
@@ -210,10 +215,16 @@ def to_tv_symbol(yahoo_exchange: str, yahoo_symbol: str) -> dict:
 
     config = EXCHANGE_MAP.get(tv_prefix, {})
 
+    # Some internal keys differ from the actual TradingView prefix
+    # (e.g. EURONEXT_AMS is internally distinct for the .AS yfinance
+    # suffix but TV's unified prefix is just EURONEXT).
+    tv_actual_prefix = config.get('tv_prefix', tv_prefix)
+
     return {
-        'tv_prefix':    tv_prefix,
+        'tv_prefix':    tv_actual_prefix,           # for TV widget (e.g. 'EURONEXT')
+        'yf_exchange':  tv_prefix,                  # internal key for yfinance lookups (e.g. 'EURONEXT_AMS')
         'ticker':       ticker,
-        'full_symbol':  f'{tv_prefix}:{ticker}',
+        'full_symbol':  f'{tv_actual_prefix}:{ticker}',
         'tv_supported': config.get('tv_embed', False),
         'label':        config.get('label', yahoo_exchange),
     }
