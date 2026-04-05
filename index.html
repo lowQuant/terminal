@@ -190,12 +190,9 @@
     <span class="text-muted" style="font-size: 11px;" id="symbol-exchange">NASDAQ</span>
   </div>
 
-  <!-- ══════════ NAV TABS ══════════ -->
-  <nav class="nav-tabs" id="nav-tabs">
-    <button class="nav-tabs__tab nav-tabs__tab--home nav-tabs__tab--active" data-tab="home">
-      <span class="kbd" style="margin-right:4px">0</span> Home
-    </button>
-    <button class="nav-tabs__tab" data-tab="overview">
+  <!-- ══════════ NAV TABS (stock-context tabs, hidden on Home) ══════════ -->
+  <nav class="nav-tabs" id="nav-tabs" style="display:none">
+    <button class="nav-tabs__tab nav-tabs__tab--active" data-tab="overview">
       <span class="kbd" style="margin-right:4px">1</span> Overview
     </button>
     <button class="nav-tabs__tab" data-tab="chart">
@@ -238,7 +235,7 @@
       </span>
       <span class="status-bar__separator"></span>
       <span class="status-bar__item text-muted">
-        <span class="kbd">1</span>-<span class="kbd">6</span> Tabs
+        <span class="kbd">Esc</span> Home
       </span>
       <span class="status-bar__separator"></span>
       <span class="status-bar__item text-muted" id="status-datasource">Data: TradingView</span>

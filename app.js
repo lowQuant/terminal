@@ -552,7 +552,9 @@ function initTabs() {
 function setActiveTab(tabName) {
   state.activeTab = tabName;
   $$('.nav-tabs__tab').forEach((t) => t.classList.remove('nav-tabs__tab--active'));
-  $(`.nav-tabs__tab[data-tab="${tabName}"]`).classList.add('nav-tabs__tab--active');
+  // Home has no dedicated tab button — guard the lookup.
+  const activeBtn = $(`.nav-tabs__tab[data-tab="${tabName}"]`);
+  if (activeBtn) activeBtn.classList.add('nav-tabs__tab--active');
   destroyLightweightCharts();
   loadTabContent(tabName);
 }
@@ -560,16 +562,20 @@ function setActiveTab(tabName) {
 function loadTabContent(tabName) {
   const dashboard = $('#dashboard');
   const symbolBar = $('#symbol-bar');
+  const navTabs = $('#nav-tabs');
 
-  // Show the active-symbol bar only when viewing a ticker-bound tab.
+  // On Home: hide the stock-context nav-tabs and the symbol bar.
+  // On any ticker tab: show them (tabs stay stock-specific for now;
+  // future: asset-class-aware tab bindings).
   if (tabName === 'home') {
     if (symbolBar) symbolBar.style.display = 'none';
-  } else if (state.symbolLoaded && symbolBar) {
-    symbolBar.style.display = '';
+    if (navTabs) navTabs.style.display = 'none';
+  } else if (state.symbolLoaded) {
+    if (symbolBar) symbolBar.style.display = '';
+    if (navTabs) navTabs.style.display = '';
   }
 
-  // If the user clicks a ticker-bound tab before searching anything,
-  // fall back to the Home page with a hint.
+  // Ticker-bound tab requested without a loaded symbol → fall back to Home.
   if (tabName !== 'home' && !state.symbolLoaded) {
     setActiveTab('home');
     return;
@@ -674,9 +680,8 @@ function renderHome(container) {
         <div class="home-quote__author">— ${escHtml(quote.author)}</div>
       </section>
 
-      <!-- Market Grid -->
+      <!-- Market Grid: Global Markets (left) + Top News (right) -->
       <section class="home-grid">
-        <!-- Major Markets (Indices / Futures / Forex / Bonds tabs) -->
         <div class="panel home-panel home-panel--markets">
           <div class="panel__header">
             <div class="panel__title"><span class="panel__title-dot"></span> Global Markets</div>
@@ -684,28 +689,11 @@ function renderHome(container) {
           <div class="panel__body" id="home-market-overview"></div>
         </div>
 
-        <!-- Top News Feed -->
         <div class="panel home-panel home-panel--news">
           <div class="panel__header">
             <div class="panel__title"><span class="panel__title-dot"></span> Top News</div>
           </div>
           <div class="panel__body" id="home-news-feed"></div>
-        </div>
-
-        <!-- US Yield Curve -->
-        <div class="panel home-panel home-panel--yields">
-          <div class="panel__header">
-            <div class="panel__title"><span class="panel__title-dot"></span> US Treasury Yields</div>
-          </div>
-          <div class="panel__body" id="home-yields"></div>
-        </div>
-
-        <!-- Commodities + FX snapshot -->
-        <div class="panel home-panel home-panel--quotes">
-          <div class="panel__header">
-            <div class="panel__title"><span class="panel__title-dot"></span> Commodities &amp; FX</div>
-          </div>
-          <div class="panel__body" id="home-commodities"></div>
         </div>
       </section>
 
@@ -739,9 +727,8 @@ function renderHome(container) {
           </div>
         </div>
         <div class="home-functions__hint">
-          <span class="kbd">/</span> to search any ticker or function &nbsp;·&nbsp;
-          <span class="kbd">0</span> Home &nbsp;·&nbsp;
-          <span class="kbd">1</span>–<span class="kbd">6</span> Ticker tabs
+          <span class="kbd">/</span> search ticker or function &nbsp;·&nbsp;
+          <span class="kbd">Esc</span> back to Home
         </div>
       </section>
     </div>
@@ -749,11 +736,14 @@ function renderHome(container) {
 
   injectMarketOverview('home-market-overview');
   injectTimeline('home-news-feed');
-  injectYieldCurve('home-yields');
-  injectCommodityQuotes('home-commodities');
 }
 
 // ── Home page widget injectors ──
+// NOTE on symbol curation: TradingView's free embed widgets only display
+// data for symbols that have free public feeds. CME/NYMEX/COMEX futures,
+// CBOE:VIX, TVC:DXY and TVC bond-yield tickers are gated behind a TV
+// login and render as empty rows inside market-overview. We stick to
+// FOREXCOM/INDEX/OANDA/TVC/BITSTAMP/BINANCE which are reliably public.
 function injectMarketOverview(containerId) {
   injectWidget(containerId,
     'https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js',
@@ -783,28 +773,15 @@ function injectMarketOverview(containerId) {
           symbols: [
             { s: 'FOREXCOM:SPXUSD', d: 'S&P 500' },
             { s: 'FOREXCOM:NSXUSD', d: 'NASDAQ 100' },
-            { s: 'FOREXCOM:DJI', d: 'Dow Jones' },
-            { s: 'INDEX:DEU40', d: 'DAX' },
-            { s: 'INDEX:SX5E', d: 'Euro Stoxx 50' },
-            { s: 'INDEX:NKY', d: 'Nikkei 225' },
-            { s: 'INDEX:HSI', d: 'Hang Seng' },
+            { s: 'FOREXCOM:DJI',    d: 'Dow Jones' },
+            { s: 'INDEX:DEU40',     d: 'DAX' },
+            { s: 'INDEX:SX5E',      d: 'Euro Stoxx 50' },
+            { s: 'INDEX:NKY',       d: 'Nikkei 225' },
+            { s: 'INDEX:HSI',       d: 'Hang Seng' },
             { s: 'BMFBOVESPA:IBOV', d: 'Ibovespa' },
-            { s: 'CBOE:VIX', d: 'VIX' },
+            { s: 'TVC:VIX',         d: 'VIX' },
           ],
           originalTitle: 'Indices',
-        },
-        {
-          title: 'Futures',
-          symbols: [
-            { s: 'CME_MINI:ES1!', d: 'S&P 500' },
-            { s: 'CME_MINI:NQ1!', d: 'Nasdaq 100' },
-            { s: 'CBOT_MINI:YM1!', d: 'Dow' },
-            { s: 'NYMEX:CL1!', d: 'Crude Oil' },
-            { s: 'COMEX:GC1!', d: 'Gold' },
-            { s: 'COMEX:SI1!', d: 'Silver' },
-            { s: 'NYMEX:NG1!', d: 'Nat Gas' },
-          ],
-          originalTitle: 'Futures',
         },
         {
           title: 'Forex',
@@ -815,22 +792,33 @@ function injectMarketOverview(containerId) {
             { s: 'FX:USDCHF', d: 'USD/CHF' },
             { s: 'FX:AUDUSD', d: 'AUD/USD' },
             { s: 'FX:USDCAD', d: 'USD/CAD' },
-            { s: 'TVC:DXY',    d: 'Dollar Index' },
+            { s: 'FX:NZDUSD', d: 'NZD/USD' },
           ],
           originalTitle: 'Forex',
         },
         {
-          title: 'Bonds',
+          title: 'Commodities',
           symbols: [
-            { s: 'TVC:US02Y', d: 'US 2Y' },
-            { s: 'TVC:US05Y', d: 'US 5Y' },
-            { s: 'TVC:US10Y', d: 'US 10Y' },
-            { s: 'TVC:US30Y', d: 'US 30Y' },
-            { s: 'TVC:DE10Y', d: 'Bund 10Y' },
-            { s: 'TVC:GB10Y', d: 'Gilt 10Y' },
-            { s: 'TVC:JP10Y', d: 'JGB 10Y' },
+            { s: 'OANDA:XAUUSD', d: 'Gold' },
+            { s: 'OANDA:XAGUSD', d: 'Silver' },
+            { s: 'TVC:USOIL',    d: 'WTI Crude' },
+            { s: 'TVC:UKOIL',    d: 'Brent Crude' },
+            { s: 'OANDA:XPTUSD', d: 'Platinum' },
+            { s: 'OANDA:XPDUSD', d: 'Palladium' },
           ],
-          originalTitle: 'Bonds',
+          originalTitle: 'Commodities',
+        },
+        {
+          title: 'Crypto',
+          symbols: [
+            { s: 'BITSTAMP:BTCUSD',  d: 'Bitcoin' },
+            { s: 'BITSTAMP:ETHUSD',  d: 'Ethereum' },
+            { s: 'BINANCE:SOLUSDT',  d: 'Solana' },
+            { s: 'BINANCE:BNBUSDT',  d: 'BNB' },
+            { s: 'BINANCE:XRPUSDT',  d: 'XRP' },
+            { s: 'BINANCE:ADAUSDT',  d: 'Cardano' },
+          ],
+          originalTitle: 'Crypto',
         },
       ],
     }
@@ -846,69 +834,6 @@ function injectTimeline(containerId) {
       displayMode: 'regular',
       width: '100%',
       height: '100%',
-      colorTheme: 'dark',
-      locale: 'en',
-    }
-  );
-}
-
-function injectYieldCurve(containerId) {
-  injectWidget(containerId,
-    'https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js',
-    {
-      width: '100%',
-      height: '100%',
-      symbolsGroups: [
-        {
-          name: 'US Treasury Yields',
-          originalName: 'US Treasury Yields',
-          symbols: [
-            { name: 'TVC:US02Y', displayName: '2-Year' },
-            { name: 'TVC:US05Y', displayName: '5-Year' },
-            { name: 'TVC:US10Y', displayName: '10-Year' },
-            { name: 'TVC:US30Y', displayName: '30-Year' },
-          ],
-        },
-      ],
-      showSymbolLogo: false,
-      isTransparent: true,
-      colorTheme: 'dark',
-      locale: 'en',
-    }
-  );
-}
-
-function injectCommodityQuotes(containerId) {
-  injectWidget(containerId,
-    'https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js',
-    {
-      width: '100%',
-      height: '100%',
-      symbolsGroups: [
-        {
-          name: 'Commodities',
-          originalName: 'Commodities',
-          symbols: [
-            { name: 'COMEX:GC1!',   displayName: 'Gold' },
-            { name: 'COMEX:SI1!',   displayName: 'Silver' },
-            { name: 'NYMEX:CL1!',   displayName: 'Crude Oil' },
-            { name: 'NYMEX:NG1!',   displayName: 'Nat Gas' },
-            { name: 'COMEX:HG1!',   displayName: 'Copper' },
-          ],
-        },
-        {
-          name: 'FX Majors',
-          originalName: 'FX Majors',
-          symbols: [
-            { name: 'FX:EURUSD',  displayName: 'EUR/USD' },
-            { name: 'FX:GBPUSD',  displayName: 'GBP/USD' },
-            { name: 'FX:USDJPY',  displayName: 'USD/JPY' },
-            { name: 'TVC:DXY',    displayName: 'Dollar Index' },
-          ],
-        },
-      ],
-      showSymbolLogo: false,
-      isTransparent: true,
       colorTheme: 'dark',
       locale: 'en',
     }
@@ -1772,7 +1697,16 @@ function initKeyboardShortcuts() {
 
     // Escape closes article modal
     if (e.key === 'Escape') {
-      closeArticleModal();
+      // Priority 1: close article modal if open
+      const modal = document.getElementById('article-modal');
+      if (modal && modal.classList.contains('article-modal--visible')) {
+        closeArticleModal();
+        return;
+      }
+      // Priority 2: return to Home (Bloomberg-style)
+      if (state.activeTab !== 'home') {
+        setActiveTab('home');
+      }
       return;
     }
 
@@ -1782,10 +1716,9 @@ function initKeyboardShortcuts() {
       $('#ticker-input').focus();
     }
 
-    // 0 = Home, 1-6 = ticker tabs
-    if (e.key === '0') {
-      setActiveTab('home');
-    } else if (e.key >= '1' && e.key <= '6') {
+    // 1-6 = ticker tabs (only active when a symbol is loaded).
+    // Bindings are stock-context for now; future: asset-class-aware.
+    if (e.key >= '1' && e.key <= '6' && state.symbolLoaded) {
       const tabs = ['overview', 'chart', 'news', 'financials', 'profile', 'watchlist'];
       const idx = parseInt(e.key) - 1;
       if (tabs[idx]) setActiveTab(tabs[idx]);

@@ -2212,16 +2212,12 @@ body {
   letter-spacing: 0.5px;
 }
 
-/* ── Market Grid ── */
+/* ── Market Grid (2-column: Global Markets + Top News) ── */
 .home-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: 1.6fr 1fr;
-  grid-template-rows: minmax(420px, 1.2fr) minmax(220px, auto) minmax(220px, auto);
-  grid-template-areas:
-    "markets news"
-    "yields  news"
-    "commod  news";
+  grid-template-columns: 1.7fr 1fr;
+  grid-template-rows: minmax(640px, auto);
 }
 
 .home-panel {
@@ -2231,20 +2227,11 @@ body {
   overflow: hidden;
 }
 
-.home-panel--markets { grid-area: markets; }
-.home-panel--news    { grid-area: news; }
-.home-panel--yields  { grid-area: yields; }
-.home-panel--quotes  { grid-area: commod; }
-
 .home-panel .panel__body {
   flex: 1;
   min-height: 0;
   padding: 0;
   overflow: hidden;
-}
-
-.home-panel--news .panel__body {
-  padding: 0;
 }
 
 /* ── Function Hints ── */
@@ -2315,26 +2302,11 @@ body {
   border-top: 1px solid var(--border-primary);
 }
 
-/* ── Home tab button styling (distinct highlight) ── */
-.nav-tabs__tab--home {
-  border-right: 1px solid var(--border-primary);
-  margin-right: 2px;
-}
-
-.nav-tabs__tab--home.nav-tabs__tab--active {
-  color: var(--accent);
-}
-
 /* ── Responsive ── */
 @media (max-width: 1100px) {
   .home-grid {
-    grid-template-areas:
-      "markets"
-      "news"
-      "yields"
-      "commod";
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(380px, auto) minmax(360px, auto) minmax(220px, auto) minmax(220px, auto);
+    grid-template-rows: minmax(500px, auto) minmax(400px, auto);
   }
 }
 
