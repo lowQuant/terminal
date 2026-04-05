@@ -10,6 +10,8 @@ const state = {
   currentExchange: 'NASDAQ',
   currentTicker: 'AAPL',
   activeTab: 'home',
+  activeFunction: null,             // non-null → a function view (ECO, EVTS, …) is active
+  ecoCountries: ['us'],             // selected countries for the Economic Calendar filter
   symbolLoaded: false,              // becomes true after the first ticker search
   recentSymbols: JSON.parse(localStorage.getItem('terminal_recent') || '[]'),
   companyInfo: null,
@@ -171,6 +173,117 @@ function isTvSupported(exchange) {
 
 
 // ═══════════════════════════════════════
+// FUNCTION REGISTRY
+// Bloomberg-style function codes (ECO, EVTS, …). Functions match in
+// search autocomplete BEFORE tickers and open a dedicated function view
+// via openFunction(code). Unimplemented ones are listed as teasers.
+// ═══════════════════════════════════════
+
+const FUNCTIONS = [
+  {
+    code: 'ECO',
+    name: 'Economic Calendar',
+    desc: 'Economic data releases & events',
+    aliases: ['ECO', 'ECON', 'ECONOMIC', 'CALENDAR'],
+    implemented: true,
+  },
+  {
+    code: 'EVTS',
+    name: 'Corporate Events',
+    desc: 'Upcoming earnings & corporate events',
+    aliases: ['EVTS', 'EVENTS', 'EARN', 'EARNINGS'],
+    implemented: true,
+  },
+  {
+    code: 'CMDTY',
+    name: 'Commodity Overview',
+    desc: 'Major commodities snapshot',
+    aliases: ['CMDTY', 'COMMODITY', 'COMMODITIES'],
+    implemented: false,
+  },
+  {
+    code: 'FX',
+    name: 'Currency Cross Rates',
+    desc: 'Foreign exchange cross rates',
+    aliases: ['FX', 'FOREX', 'CURRENCY'],
+    implemented: false,
+  },
+  {
+    code: 'WEIF',
+    name: 'World Equity Futures',
+    desc: 'Global index futures',
+    aliases: ['WEIF', 'FUTURES'],
+    implemented: false,
+  },
+  {
+    code: 'MOV',
+    name: 'Top Movers',
+    desc: 'Gainers & losers',
+    aliases: ['MOV', 'MOVERS', 'GAINERS', 'LOSERS'],
+    implemented: false,
+  },
+  {
+    code: 'WL',
+    name: 'Watchlist',
+    desc: 'Your personalized watchlist',
+    aliases: ['WL', 'WATCHLIST'],
+    implemented: false,
+  },
+];
+
+function matchFunctions(query) {
+  const q = query.trim().toUpperCase();
+  if (!q) return [];
+  return FUNCTIONS.filter((fn) =>
+    fn.code === q || fn.aliases.some((a) => a.startsWith(q))
+  );
+}
+
+function openFunction(code) {
+  const fn = FUNCTIONS.find((f) => f.code === code);
+  if (!fn) return;
+  if (!fn.implemented) {
+    showToast(`${fn.code} — coming soon`);
+    return;
+  }
+  state.activeFunction = code;
+  state.activeTab = null;
+
+  // Hide stock-context UI
+  const navTabs = $('#nav-tabs');
+  const symbolBar = $('#symbol-bar');
+  if (navTabs) navTabs.style.display = 'none';
+  if (symbolBar) symbolBar.style.display = 'none';
+
+  destroyLightweightCharts();
+
+  const dashboard = $('#dashboard');
+  switch (code) {
+    case 'ECO':  renderEcoCalendar(dashboard); break;
+    case 'EVTS': renderEventsCalendar(dashboard); break;
+  }
+  updateStatusBar();
+}
+
+// ── Lightweight toast (used for "coming soon" messages) ──
+function showToast(message) {
+  let toast = document.getElementById('terminal-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'terminal-toast';
+    toast.className = 'terminal-toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.classList.add('terminal-toast--visible');
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => {
+    toast.classList.remove('terminal-toast--visible');
+  }, 2200);
+}
+
+
+// ═══════════════════════════════════════
 // SEARCH / AUTOCOMPLETE
 // ═══════════════════════════════════════
 
@@ -286,19 +399,29 @@ function initSearch() {
       // Otherwise, use the raw input value
       const val = input.value.trim().toUpperCase();
       if (val) {
-        // Check if it's already in EXCHANGE:TICKER format
+        // 1. Functions always take priority (e.g. "ECO" → Economic Calendar)
+        const fnMatch = FUNCTIONS.find(
+          (f) => f.code === val || f.aliases.includes(val)
+        );
+        if (fnMatch) {
+          clearSearch();
+          openFunction(fnMatch.code);
+          return;
+        }
+
+        // 2. Check if it's already in EXCHANGE:TICKER format
         if (val.includes(':')) {
           const [exchange] = val.split(':');
           loadSymbol(val, isTvSupported(exchange));
         } else {
-          // Try to find in search results first
+          // 3. Try to find in search results first
           const match = state.searchResults.find(
             (r) => r.ticker.toUpperCase() === val || r.symbol.toUpperCase() === val
           );
           if (match) {
             loadSymbol(match.tvSymbol, match.tvSupported);
           } else {
-            // Default: guess US exchange
+            // 4. Default: guess US exchange
             loadSymbol(`NASDAQ:${val}`, true);
           }
         }
@@ -327,51 +450,96 @@ function showSearchLoading() {
   dropdown.classList.add('recent-dropdown--visible');
 }
 
+function renderFunctionMatches(query) {
+  const matches = matchFunctions(query);
+  if (matches.length === 0) return '';
+  let html = `<div class="recent-dropdown__header">Functions</div>`;
+  html += matches.map((fn) => {
+    const stateClass = fn.implemented ? '' : 'search-result--disabled';
+    const badge = fn.implemented
+      ? `<span class="search-result__fn-badge">FN</span>`
+      : `<span class="search-result__fn-badge search-result__fn-badge--soon">SOON</span>`;
+    return `
+      <div class="search-result search-result--function ${stateClass}"
+           onclick="openFunction('${fn.code}'); clearSearch();"
+           data-function="${fn.code}">
+        <span class="search-result__ticker search-result__ticker--function">${escHtml(fn.code)}</span>
+        <div class="search-result__info">
+          <span class="search-result__name">${escHtml(fn.name)}</span>
+          <span class="search-result__exchange">${escHtml(fn.desc)}</span>
+        </div>
+        <div class="search-result__badges">${badge}</div>
+      </div>
+    `;
+  }).join('');
+  return html;
+}
+
 function renderSearchResults(results, query) {
   const dropdown = $('#recent-dropdown');
 
-  if (results.length === 0) {
-    // No API results — fall back to watchlist filter and allow raw input
+  // Functions always come first
+  const functionsHtml = renderFunctionMatches(query);
+
+  if (results.length === 0 && !functionsHtml) {
+    // No API results and no function matches — fall back to watchlist filter
     renderWatchlistFilter(query);
     return;
   }
 
-  let html = `<div class="recent-dropdown__header">Search Results</div>`;
-  html += results.map((r, i) => {
-    const tvBadge = r.tvSupported
-      ? `<span class="search-result__tv-badge search-result__tv-badge--supported">TV</span>`
-      : `<span class="search-result__tv-badge search-result__tv-badge--fallback">YF</span>`;
+  let html = functionsHtml;
 
-    return `
-      <div class="search-result ${i === state.searchActiveIndex ? 'search-result--active' : ''}"
-           onclick="selectSearchResult(${i})"
-           data-index="${i}">
-        <span class="search-result__ticker">${escHtml(r.ticker)}</span>
-        <div class="search-result__info">
-          <span class="search-result__name">${escHtml(r.name)}</span>
-          <span class="search-result__exchange">${escHtml(r.exchange)}</span>
+  if (results.length > 0) {
+    html += `<div class="recent-dropdown__header">Search Results</div>`;
+    html += results.map((r, i) => {
+      const tvBadge = r.tvSupported
+        ? `<span class="search-result__tv-badge search-result__tv-badge--supported">TV</span>`
+        : `<span class="search-result__tv-badge search-result__tv-badge--fallback">YF</span>`;
+
+      return `
+        <div class="search-result ${i === state.searchActiveIndex ? 'search-result--active' : ''}"
+             onclick="selectSearchResult(${i})"
+             data-index="${i}">
+          <span class="search-result__ticker">${escHtml(r.ticker)}</span>
+          <div class="search-result__info">
+            <span class="search-result__name">${escHtml(r.name)}</span>
+            <span class="search-result__exchange">${escHtml(r.exchange)}</span>
+          </div>
+          <div class="search-result__badges">
+            <span class="search-result__type-badge">${escHtml(r.type || 'EQUITY')}</span>
+            ${tvBadge}
+          </div>
         </div>
-        <div class="search-result__badges">
-          <span class="search-result__type-badge">${escHtml(r.type || 'EQUITY')}</span>
-          ${tvBadge}
-        </div>
-      </div>
-    `;
-  }).join('');
+      `;
+    }).join('');
+  }
 
   dropdown.innerHTML = html;
   dropdown.classList.add('recent-dropdown--visible', 'recent-dropdown--scrollable');
 }
 
+function clearSearch() {
+  const input = $('#ticker-input');
+  if (input) { input.value = ''; input.blur(); }
+  const dropdown = $('#recent-dropdown');
+  if (dropdown) dropdown.classList.remove('recent-dropdown--visible');
+  state.searchResults = [];
+  state.searchActiveIndex = -1;
+}
+
 function renderWatchlistFilter(query) {
   const dropdown = $('#recent-dropdown');
   const val = query.toUpperCase();
+
+  // Functions first
+  let html = renderFunctionMatches(query);
+
   const filtered = state.watchlist.filter(
     (w) => w.symbol.includes(val) || w.name.toUpperCase().includes(val)
   );
 
-  let html = `<div class="recent-dropdown__header">Suggestions</div>`;
   if (filtered.length > 0) {
+    html += `<div class="recent-dropdown__header">Suggestions</div>`;
     html += filtered.map((w) => `
       <div class="recent-dropdown__item" onclick="loadSymbol('${w.exchange}:${w.symbol}', true)">
         <span class="recent-dropdown__item-symbol">${w.symbol}</span>
@@ -454,10 +622,11 @@ function loadSymbol(fullSymbol, tvSupported, companyName) {
   localStorage.setItem('terminal_recent', JSON.stringify(state.recentSymbols));
 
   state.symbolLoaded = true;
+  state.activeFunction = null;    // leaving any function view
   updateSymbolBar(companyName);
 
-  // If we were on the Home page, flip to Overview on first ticker search.
-  if (state.activeTab === 'home') {
+  // If we were on the Home page or in a function view, flip to Overview.
+  if (state.activeTab === 'home' || state.activeTab === null) {
     setActiveTab('overview');
   } else {
     loadTabContent(state.activeTab);
@@ -551,6 +720,10 @@ function initTabs() {
 
 function setActiveTab(tabName) {
   state.activeTab = tabName;
+  // Exiting a function view — clear it so Home / stock tabs render normally.
+  if (tabName === 'home' || tabName !== null) {
+    state.activeFunction = null;
+  }
   $$('.nav-tabs__tab').forEach((t) => t.classList.remove('nav-tabs__tab--active'));
   // Home has no dedicated tab button — guard the lookup.
   const activeBtn = $(`.nav-tabs__tab[data-tab="${tabName}"]`);
@@ -838,6 +1011,284 @@ function injectTimeline(containerId) {
       locale: 'en',
     }
   );
+}
+
+
+// ═══════════════════════════════════════
+// ECO — Economic Calendar
+// ═══════════════════════════════════════
+
+// Countries offered in the filter. Codes match TradingView's event widget.
+const ECO_COUNTRIES = [
+  { code: 'us', label: 'United States', flag: '🇺🇸' },
+  { code: 'eu', label: 'Eurozone',      flag: '🇪🇺' },
+  { code: 'gb', label: 'United Kingdom',flag: '🇬🇧' },
+  { code: 'de', label: 'Germany',       flag: '🇩🇪' },
+  { code: 'fr', label: 'France',        flag: '🇫🇷' },
+  { code: 'it', label: 'Italy',         flag: '🇮🇹' },
+  { code: 'es', label: 'Spain',         flag: '🇪🇸' },
+  { code: 'ch', label: 'Switzerland',   flag: '🇨🇭' },
+  { code: 'jp', label: 'Japan',         flag: '🇯🇵' },
+  { code: 'cn', label: 'China',         flag: '🇨🇳' },
+  { code: 'in', label: 'India',         flag: '🇮🇳' },
+  { code: 'kr', label: 'South Korea',   flag: '🇰🇷' },
+  { code: 'au', label: 'Australia',     flag: '🇦🇺' },
+  { code: 'nz', label: 'New Zealand',   flag: '🇳🇿' },
+  { code: 'ca', label: 'Canada',        flag: '🇨🇦' },
+  { code: 'mx', label: 'Mexico',        flag: '🇲🇽' },
+  { code: 'br', label: 'Brazil',        flag: '🇧🇷' },
+  { code: 'tr', label: 'Turkey',        flag: '🇹🇷' },
+  { code: 'za', label: 'South Africa',  flag: '🇿🇦' },
+];
+
+function renderEcoCalendar(container) {
+  container.className = 'dashboard dashboard--function';
+  container.innerHTML = `
+    <div class="function-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">ECO</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">Economic Calendar</div>
+            <div class="function-header__name-sub">Economic data releases &amp; events</div>
+          </div>
+        </div>
+      </header>
+
+      <div class="function-toolbar">
+        <div class="function-toolbar__label">Countries</div>
+        <div class="country-filter" id="eco-country-filter"></div>
+        <div class="function-toolbar__actions">
+          <button class="country-btn country-btn--ghost" onclick="setEcoAllCountries()">All</button>
+          <button class="country-btn country-btn--ghost" onclick="setEcoMajorCountries()">G7</button>
+          <button class="country-btn country-btn--ghost" onclick="clearEcoCountries()">Clear</button>
+        </div>
+      </div>
+
+      <div class="panel function-panel">
+        <div class="panel__body" id="eco-widget-container"></div>
+      </div>
+    </div>
+  `;
+  renderEcoCountryFilter();
+  injectEcoWidget();
+}
+
+function renderEcoCountryFilter() {
+  const container = $('#eco-country-filter');
+  if (!container) return;
+  container.innerHTML = ECO_COUNTRIES.map((c) => {
+    const active = state.ecoCountries.includes(c.code);
+    return `
+      <button class="country-btn ${active ? 'country-btn--active' : ''}"
+              onclick="toggleEcoCountry('${c.code}')"
+              title="${escHtml(c.label)}">
+        <span class="country-btn__flag">${c.flag}</span>
+        <span class="country-btn__code">${c.code.toUpperCase()}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function toggleEcoCountry(code) {
+  const idx = state.ecoCountries.indexOf(code);
+  if (idx >= 0) state.ecoCountries.splice(idx, 1);
+  else state.ecoCountries.push(code);
+  renderEcoCountryFilter();
+  injectEcoWidget();
+}
+
+function setEcoAllCountries() {
+  state.ecoCountries = ECO_COUNTRIES.map((c) => c.code);
+  renderEcoCountryFilter();
+  injectEcoWidget();
+}
+
+function setEcoMajorCountries() {
+  state.ecoCountries = ['us', 'eu', 'gb', 'de', 'fr', 'it', 'jp', 'ca'];
+  renderEcoCountryFilter();
+  injectEcoWidget();
+}
+
+function clearEcoCountries() {
+  state.ecoCountries = [];
+  renderEcoCountryFilter();
+  injectEcoWidget();
+}
+
+function injectEcoWidget() {
+  const containerId = 'eco-widget-container';
+  const countryFilter = state.ecoCountries.length > 0
+    ? state.ecoCountries.join(',')
+    : 'us,eu,gb,de,fr,jp,cn,ca,au';   // sensible fallback if user clears all
+  injectWidget(containerId,
+    'https://s3.tradingview.com/external-embedding/embed-widget-events.js',
+    {
+      colorTheme: 'dark',
+      isTransparent: true,
+      width: '100%',
+      height: '100%',
+      locale: 'en',
+      importanceFilter: '-1,0,1',
+      countryFilter,
+    }
+  );
+}
+
+
+// ═══════════════════════════════════════
+// EVTS — Corporate Events (Earnings Calendar)
+// ═══════════════════════════════════════
+
+function renderEventsCalendar(container) {
+  container.className = 'dashboard dashboard--function';
+  container.innerHTML = `
+    <div class="function-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">EVTS</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">Corporate Events</div>
+            <div class="function-header__name-sub">Upcoming earnings from top global tickers</div>
+          </div>
+        </div>
+      </header>
+
+      <div class="function-toolbar">
+        <div class="function-toolbar__label">Window</div>
+        <div class="range-filter" id="evts-range-filter">
+          <button class="country-btn" data-range="7">Next 7 days</button>
+          <button class="country-btn country-btn--active" data-range="14">Next 14 days</button>
+          <button class="country-btn" data-range="30">Next 30 days</button>
+        </div>
+        <div class="function-toolbar__actions">
+          <button class="country-btn country-btn--ghost" onclick="reloadEvtsCalendar()">Refresh</button>
+        </div>
+      </div>
+
+      <div class="panel function-panel">
+        <div class="panel__body" id="evts-table-container">
+          <div class="evts-loading">
+            <div class="search-loading__spinner"></div>
+            <span>Loading earnings calendar…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Wire the range filter
+  $$('#evts-range-filter .country-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('#evts-range-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
+      btn.classList.add('country-btn--active');
+      loadEvtsCalendar(parseInt(btn.dataset.range));
+    });
+  });
+
+  loadEvtsCalendar(14);
+}
+
+async function loadEvtsCalendar(days) {
+  const container = $('#evts-table-container');
+  if (!container) return;
+  container.innerHTML = `
+    <div class="evts-loading">
+      <div class="search-loading__spinner"></div>
+      <span>Loading earnings calendar…</span>
+    </div>
+  `;
+
+  try {
+    const resp = await fetch(`/api/earnings-calendar?days=${days}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    if (!Array.isArray(data) || data.length === 0) {
+      container.innerHTML = `
+        <div class="evts-empty">
+          <div class="evts-empty__icon">📅</div>
+          <div>No earnings scheduled in the next ${days} days.</div>
+        </div>
+      `;
+      return;
+    }
+
+    // Group by date
+    const byDate = {};
+    data.forEach((e) => {
+      const d = e.date;
+      if (!byDate[d]) byDate[d] = [];
+      byDate[d].push(e);
+    });
+    const sortedDates = Object.keys(byDate).sort();
+
+    let html = `
+      <div class="evts-table">
+        <div class="evts-table__header">
+          <div>Date</div>
+          <div>Ticker</div>
+          <div>Company</div>
+          <div class="evts-table__num">EPS Est.</div>
+          <div class="evts-table__num">Rev. Est.</div>
+          <div class="evts-table__num">Mkt Cap</div>
+        </div>
+    `;
+
+    sortedDates.forEach((date) => {
+      const rows = byDate[date];
+      const label = fmtEvtsDate(date);
+      html += `<div class="evts-table__date-row">${escHtml(label)} — ${rows.length} companies</div>`;
+      rows.forEach((e) => {
+        html += `
+          <div class="evts-table__row" onclick="loadSymbol('${escHtml(e.tv_symbol || 'NASDAQ:' + e.ticker)}', true)">
+            <div class="evts-table__date">${escHtml(fmtEvtsShortDate(date))}</div>
+            <div class="evts-table__ticker">${escHtml(e.ticker)}</div>
+            <div class="evts-table__name">${escHtml(e.name || '')}</div>
+            <div class="evts-table__num">${e.eps_estimate != null ? Number(e.eps_estimate).toFixed(2) : '—'}</div>
+            <div class="evts-table__num">${e.revenue_estimate != null ? fmtBigNum(e.revenue_estimate) : '—'}</div>
+            <div class="evts-table__num">${e.market_cap != null ? fmtBigNum(e.market_cap) : '—'}</div>
+          </div>
+        `;
+      });
+    });
+    html += `</div>`;
+    container.innerHTML = html;
+  } catch (err) {
+    console.error('Failed to load earnings calendar:', err);
+    container.innerHTML = `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">⚠</div>
+        <div>Could not load earnings calendar.</div>
+        <div class="text-muted" style="font-size:11px;margin-top:8px;">${escHtml(err.message)}</div>
+      </div>
+    `;
+  }
+}
+
+function reloadEvtsCalendar() {
+  const activeBtn = $('#evts-range-filter .country-btn--active');
+  const days = activeBtn ? parseInt(activeBtn.dataset.range) : 14;
+  loadEvtsCalendar(days);
+}
+
+function fmtEvtsDate(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+}
+
+function fmtEvtsShortDate(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function fmtBigNum(n) {
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return (n / 1e12).toFixed(2) + 'T';
+  if (abs >= 1e9)  return (n / 1e9).toFixed(2) + 'B';
+  if (abs >= 1e6)  return (n / 1e6).toFixed(1) + 'M';
+  if (abs >= 1e3)  return (n / 1e3).toFixed(1) + 'K';
+  return String(n);
 }
 
 

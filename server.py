@@ -8,6 +8,8 @@ from flask import Flask, jsonify, request, send_from_directory
 import yfinance as yf
 import time
 import traceback
+from datetime import datetime, date, timedelta
+from concurrent.futures import ThreadPoolExecutor
 from exchange_map import (
     to_yfinance_ticker,
     to_tv_symbol,
@@ -473,6 +475,120 @@ def get_article():
             'url': url,
             'fallback': True,
         })
+
+
+# ═══════════════════════════════════════
+# EVTS — EARNINGS CALENDAR API
+# ═══════════════════════════════════════
+
+# Curated universe of heavyweight global tickers. yfinance doesn't expose a
+# market-wide earnings calendar, so EVTS polls `Ticker.calendar` in parallel
+# across this list and surfaces those with an upcoming earnings date.
+# Picked for broad sector & mega-cap coverage; add/remove freely.
+EARNINGS_UNIVERSE = [
+    # Mega-cap tech
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AVGO',
+    'ORCL', 'ADBE', 'CRM', 'NFLX', 'AMD', 'INTC', 'CSCO', 'QCOM', 'IBM',
+    'TXN', 'INTU', 'NOW', 'PLTR', 'UBER', 'SHOP', 'PYPL', 'SQ',
+    # Financials
+    'JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'BLK', 'SCHW', 'V', 'MA',
+    'AXP', 'BRK-B',
+    # Healthcare / Pharma
+    'UNH', 'JNJ', 'LLY', 'PFE', 'MRK', 'ABBV', 'TMO', 'ABT', 'DHR',
+    'BMY', 'AMGN', 'GILD',
+    # Consumer
+    'WMT', 'COST', 'HD', 'MCD', 'NKE', 'SBUX', 'TGT', 'LOW', 'DIS',
+    'PG', 'KO', 'PEP', 'PM', 'MO',
+    # Energy & Industrials
+    'XOM', 'CVX', 'COP', 'SLB', 'OXY', 'BA', 'CAT', 'GE', 'HON',
+    'LMT', 'RTX', 'DE', 'UPS', 'FDX',
+    # Autos & Semis
+    'F', 'GM', 'MU', 'LRCX', 'AMAT', 'ASML',
+    # Media / Comms
+    'T', 'VZ', 'CMCSA', 'TMUS',
+    # High-profile growth / secondary names
+    'COIN', 'SNOW', 'DDOG', 'CRWD', 'ZS', 'PANW', 'NET', 'MDB',
+    'ROKU', 'SPOT', 'ABNB', 'DASH', 'RIVN', 'LCID',
+]
+
+
+def _fetch_one_earnings(ticker):
+    """Pull the next upcoming earnings event for a single ticker."""
+    try:
+        t = yf.Ticker(ticker)
+        cal = t.calendar
+        if not cal or not isinstance(cal, dict):
+            return None
+
+        earnings_dates = cal.get('Earnings Date') or []
+        if not earnings_dates:
+            return None
+
+        # Pick the earliest future date
+        today = date.today()
+        future_dates = [d for d in earnings_dates if isinstance(d, date) and d >= today]
+        if not future_dates:
+            return None
+        next_date = min(future_dates)
+
+        # Fundamentals (short call for name / market cap)
+        info = {}
+        try:
+            info = t.info or {}
+        except Exception:
+            pass
+
+        def _num(key):
+            v = cal.get(key)
+            if v is None:
+                return None
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        return {
+            'ticker':           ticker,
+            'name':             info.get('shortName') or info.get('longName') or ticker,
+            'date':             next_date.isoformat(),
+            'eps_estimate':     _num('Earnings Average'),
+            'eps_high':         _num('Earnings High'),
+            'eps_low':          _num('Earnings Low'),
+            'revenue_estimate': _num('Revenue Average'),
+            'market_cap':       info.get('marketCap'),
+            'tv_symbol':        f'NASDAQ:{ticker}' if info.get('exchange', '').upper() in ('NMS', 'NGM', 'NCM') else f'NYSE:{ticker}',
+        }
+    except Exception:
+        return None
+
+
+@app.route('/api/earnings-calendar')
+def earnings_calendar():
+    """Return upcoming earnings for the curated universe within `days`."""
+    try:
+        days = int(request.args.get('days', 14))
+    except ValueError:
+        days = 14
+    days = max(1, min(days, 60))
+
+    cutoff = date.today() + timedelta(days=days)
+
+    def fetch():
+        results = []
+        # Parallelize yfinance lookups — they're IO-bound
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            for r in ex.map(_fetch_one_earnings, EARNINGS_UNIVERSE):
+                if r and r['date'] <= cutoff.isoformat():
+                    results.append(r)
+        results.sort(key=lambda x: (x['date'], x['ticker']))
+        return results
+
+    try:
+        data = cached(f'earnings_{days}', fetch, ttl=1800)  # 30-min cache
+        return jsonify(data)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
