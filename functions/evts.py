@@ -170,10 +170,11 @@ def earnings_calendar():
             rows = _fetch_us_earnings(days)
         else:
             # Single scanner call per market — no per-ticker yfinance.
+            # We fetch ALL stocks (no cap) and let the date-window
+            # filter surface only those actually reporting.
             rows = fetch_earnings_calendar(
                 markets=config['markets'],
                 days=days,
-                top_n_per_market=1500,
             )
         rows.sort(key=lambda r: (r['date'], -(r.get('market_cap') or 0)))
         return rows

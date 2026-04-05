@@ -114,9 +114,14 @@ def _to_yahoo_ticker(tv_name: str, country: str, market_slug: str) -> str:
     return f'{base}{suffix}'
 
 
-def _post_scanner(market: str, columns: List[str], top_n: int = 500,
-                  timeout: int = 15) -> List[Dict]:
-    """Raw POST to the scanner endpoint. Returns the ``data`` array."""
+def _post_scanner(market: str, columns: List[str], top_n: int = 10000,
+                  timeout: int = 20) -> List[Dict]:
+    """Raw POST to the scanner endpoint. Returns the ``data`` array.
+
+    ``top_n`` defaults to 10 000 — effectively "all stocks". The scanner
+    returns at most as many as exist for that market; we never want to
+    artificially truncate since date-window filtering happens later.
+    """
     body = {
         'filter': [
             {'left': 'type',       'operation': 'equal',    'right': 'stock'},
@@ -126,7 +131,7 @@ def _post_scanner(market: str, columns: List[str], top_n: int = 500,
         ],
         'columns': columns,
         'sort':    {'sortBy': 'market_cap_basic', 'sortOrder': 'desc'},
-        'range':   [0, max(1, min(top_n, 5000))],
+        'range':   [0, top_n],
     }
     data = json.dumps(body).encode('utf-8')
     req = urllib.request.Request(
@@ -145,7 +150,6 @@ def _post_scanner(market: str, columns: List[str], top_n: int = 500,
 def fetch_earnings_calendar(
     markets: List[str],
     days: int = 14,
-    top_n_per_market: int = 500,
 ) -> List[Dict[str, Any]]:
     """Fetch upcoming earnings from the TV scanner in a single call per market.
 
@@ -174,7 +178,7 @@ def fetch_earnings_calendar(
 
     def _process_market(market_slug):
         try:
-            rows = _post_scanner(market_slug, columns, top_n=top_n_per_market)
+            rows = _post_scanner(market_slug, columns)
         except Exception as e:
             print(f'[tv-scanner] {market_slug} failed: {e}')
             return []

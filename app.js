@@ -1192,9 +1192,9 @@ const evtsState = {
 // constituents (STOXX 50 + FTSE top / Nikkei 225 / Hang Seng).
 const EVTS_COUNTRIES = [
   { code: 'US', label: 'United States',  flag: '🇺🇸', scopeAllLabel: 'All US Companies' },
-  { code: 'EU', label: 'Europe',         flag: '🇪🇺', scopeAllLabel: 'Top 300 European' },
-  { code: 'JP', label: 'Japan',          flag: '🇯🇵', scopeAllLabel: 'Top 200 Japanese' },
-  { code: 'HK', label: 'Hong Kong',      flag: '🇭🇰', scopeAllLabel: 'Top 150 Hong Kong' },
+  { code: 'EU', label: 'Europe',         flag: '🇪🇺', scopeAllLabel: 'All European' },
+  { code: 'JP', label: 'Japan',          flag: '🇯🇵', scopeAllLabel: 'All Japanese' },
+  { code: 'HK', label: 'Hong Kong',      flag: '🇭🇰', scopeAllLabel: 'All Hong Kong' },
 ];
 
 function renderEventsCalendar(container) {
