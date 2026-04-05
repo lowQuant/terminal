@@ -2601,134 +2601,46 @@ body {
   }
 }
 
-/* ── ECO Table (mirrors .evts-table look with event-specific columns) ── */
-.eco-table {
-  overflow-y: auto;
-  height: 100%;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.eco-table__header,
-.eco-table__row {
+/* ── ECO: static column headers overlaid above the TV events widget ──
+   The TradingView events widget renders its own rows but doesn't
+   expose column headers. Track widths below approximate the widget's
+   internal columns — rough but good enough to orient the user. */
+.eco-widget-headers {
   display: grid;
-  grid-template-columns: 60px 80px 100px 1fr 90px 90px 90px;
-  gap: 12px;
-  padding: 10px 16px;
+  grid-template-columns: 70px 60px 60px 1fr 130px 130px 130px;
+  gap: 0;
   align-items: center;
-}
-
-.eco-table__header {
+  padding: 10px 18px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-primary);
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 1px;
+  letter-spacing: 1.2px;
   color: var(--text-tertiary);
   text-transform: uppercase;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-}
-
-.eco-table__date-row {
-  padding: 8px 16px;
-  background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-primary);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  letter-spacing: 0.5px;
-}
-
-.eco-table__row {
-  border-bottom: 1px solid var(--border-primary);
-  transition: background 0.12s var(--ease);
-}
-
-.eco-table__row:hover {
-  background: var(--bg-panel-hover);
-}
-
-.eco-table__time {
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.eco-table__country {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.eco-table__flag { font-size: 14px; line-height: 1; }
-.eco-table__ccy  { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
-
-.eco-table__impact {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.impact-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
   flex-shrink: 0;
-  display: inline-block;
 }
 
-.impact--high    { background: var(--red); box-shadow: 0 0 6px rgba(255, 82, 82, 0.5); }
-.impact--medium  { background: var(--yellow); }
-.impact--low     { background: var(--text-tertiary); }
-.impact--holiday { background: var(--blue); }
-
-.impact-label {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.eco-table__title {
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.eco-table__num {
-  color: var(--text-primary);
+.eco-widget-headers__num {
   text-align: right;
-  font-variant-numeric: tabular-nums;
+  padding-right: 18px;
 }
-
-.eco-table__num--positive { color: var(--green); }
-.eco-table__num--negative { color: var(--red); }
 
 @media (max-width: 1100px) {
-  .eco-table__header,
-  .eco-table__row {
-    grid-template-columns: 55px 70px 80px 1fr 75px 75px 75px;
-    gap: 8px;
-    padding: 9px 12px;
+  .eco-widget-headers {
+    grid-template-columns: 55px 50px 50px 1fr 90px 90px 90px;
+    padding: 9px 14px;
   }
-  .eco-table__row .impact-label { display: none; }
+  .eco-widget-headers__num { padding-right: 12px; }
 }
 
-@media (max-width: 900px) {
-  .eco-table__header,
-  .eco-table__row {
-    grid-template-columns: 50px 55px 1fr 70px 70px;
-  }
-  .eco-table__header > *:nth-child(3),
-  .eco-table__row    > *:nth-child(3),
-  .eco-table__header > *:nth-child(7),
-  .eco-table__row    > *:nth-child(7) {
-    display: none;
+@media (max-width: 800px) {
+  .eco-widget-headers {
+    grid-template-columns: 45px 42px 42px 1fr 70px 70px 70px;
+    padding: 8px 10px;
+    font-size: 9px;
+    letter-spacing: 0.8px;
   }
 }
 

@@ -481,77 +481,19 @@ def get_article():
 
 
 # ═══════════════════════════════════════
-# ECO — ECONOMIC CALENDAR API
-# ═══════════════════════════════════════
-#
-# ECO uses the free ForexFactory JSON feed which includes title, country
-# (as currency code), impact rating, and – crucially – the Actual /
-# Forecast / Previous columns the embedded TradingView widget lacks.
-# No API key, no scraping.
-
-FF_URLS = [
-    'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
-    'https://nfs.faireconomy.media/ff_calendar_nextweek.json',
-]
-
-
-def _fetch_json(url, timeout=15):
-    req = urllib.request.Request(url, headers={
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-                      'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-    })
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = resp.read()
-    return json.loads(body.decode('utf-8'))
-
-
-@app.route('/api/eco-calendar')
-def eco_calendar():
-    """Aggregate this-week + next-week economic events from ForexFactory."""
-    def fetch():
-        events = []
-        for url in FF_URLS:
-            try:
-                data = _fetch_json(url)
-                if isinstance(data, list):
-                    events.extend(data)
-            except Exception as e:
-                print(f'[eco-calendar] {url} failed: {e}')
-        # Normalise — pass through most fields, ensure keys exist
-        out = []
-        for ev in events:
-            if not isinstance(ev, dict):
-                continue
-            out.append({
-                'title':    ev.get('title', ''),
-                'country':  ev.get('country', ''),      # currency code: USD, EUR, …
-                'date':     ev.get('date', ''),         # ISO datetime with TZ
-                'impact':   ev.get('impact', ''),       # Low / Medium / High / Holiday
-                'forecast': ev.get('forecast', ''),
-                'previous': ev.get('previous', ''),
-                'actual':   ev.get('actual', ''),
-            })
-        # Sort by date ascending
-        out.sort(key=lambda x: x.get('date') or '')
-        return out
-
-    try:
-        data = cached('eco_calendar', fetch, ttl=900)   # 15-min cache
-        return jsonify(data)
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
-# ═══════════════════════════════════════
 # EVTS — EARNINGS CALENDAR API
 # ═══════════════════════════════════════
 #
-# EVTS uses NASDAQ's free public earnings API (no key) which returns the
-# full daily earnings calendar — all US-listed companies reporting on a
-# given date. We parallelise per-day calls over the requested window.
+# TradingView does NOT expose a public embed widget for earnings, so we
+# source data per region:
+#
+#   US → NASDAQ's free public earnings API (no key, full daily market
+#        coverage — every US-listed company reporting that day)
+#   EU / JP / HK → yfinance Ticker.calendar polled in parallel across
+#        the region's benchmark index constituents (STOXX 50 + FTSE top,
+#        Nikkei 225 top, Hang Seng). Not every global name has earnings
+#        metadata in Yahoo, but coverage is far broader than a
+#        hand-picked list.
 
 NASDAQ_UA = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
@@ -560,6 +502,45 @@ NASDAQ_UA = {
     'Accept': 'application/json, text/plain, */*',
     'Origin': 'https://www.nasdaq.com',
     'Referer': 'https://www.nasdaq.com/',
+}
+
+# Regional index-constituent universes (Yahoo Finance ticker format).
+# These cover the benchmark indices: STOXX Europe 50 + FTSE 100, Nikkei
+# 225 top names, Hang Seng Index.
+EU_UNIVERSE = [
+    # Eurozone / Continental Europe
+    'ASML.AS', 'SAP.DE', 'SIE.DE', 'ALV.DE', 'DTE.DE', 'BAS.DE', 'BAYN.DE',
+    'BMW.DE', 'MBG.DE', 'VOW3.DE', 'ADS.DE', 'AIR.PA', 'MC.PA', 'OR.PA',
+    'TTE.PA', 'SAN.PA', 'SU.PA', 'BNP.PA', 'CS.PA', 'EL.PA', 'KER.PA',
+    'DG.PA', 'AI.PA', 'ABI.BR', 'ENEL.MI', 'ENI.MI', 'ISP.MI', 'UCG.MI',
+    'STLAM.MI', 'IBE.MC', 'SAN.MC', 'BBVA.MC', 'ITX.MC', 'NOVN.SW',
+    'ROG.SW', 'NESN.SW', 'UBSG.SW', 'ZURN.SW',
+    # UK (LSE)
+    'AZN.L', 'SHEL.L', 'HSBA.L', 'ULVR.L', 'GSK.L', 'RIO.L', 'DGE.L',
+    'BP.L', 'GLEN.L', 'REL.L', 'LSEG.L', 'BARC.L', 'LLOY.L',
+]
+
+JP_UNIVERSE = [
+    '7203.T', '6758.T', '6861.T', '8035.T', '9983.T', '9984.T', '6098.T',
+    '6367.T', '8306.T', '8316.T', '8411.T', '7974.T', '4063.T', '6501.T',
+    '9432.T', '9433.T', '9434.T', '6902.T', '6954.T', '6594.T', '7751.T',
+    '6752.T', '6702.T', '7267.T', '7269.T', '7201.T', '4502.T', '4503.T',
+    '7011.T', '8058.T', '8031.T', '8053.T', '8001.T', '4568.T', '4578.T',
+]
+
+HK_UNIVERSE = [
+    '0700.HK', '9988.HK', '3690.HK', '1299.HK', '0005.HK', '0939.HK',
+    '1398.HK', '0388.HK', '0941.HK', '2318.HK', '0883.HK', '0386.HK',
+    '3988.HK', '2628.HK', '1288.HK', '0857.HK', '1810.HK', '9618.HK',
+    '1024.HK', '3968.HK', '1211.HK', '2333.HK', '0003.HK', '0011.HK',
+    '0016.HK', '0066.HK', '0017.HK', '0001.HK', '0002.HK', '0688.HK',
+    '0027.HK', '0175.HK', '0669.HK', '0267.HK',
+]
+
+REGIONAL_UNIVERSES = {
+    'EU': EU_UNIVERSE,
+    'JP': JP_UNIVERSE,
+    'HK': HK_UNIVERSE,
 }
 
 
@@ -587,6 +568,7 @@ def _parse_money(s):
         return None
 
 
+# ── US coverage: NASDAQ public API ──
 def _fetch_nasdaq_earnings_day(d):
     """Fetch earnings for a single day from NASDAQ's public API."""
     url = f'https://api.nasdaq.com/api/calendar/earnings?date={d.isoformat()}'
@@ -595,7 +577,7 @@ def _fetch_nasdaq_earnings_day(d):
         with urllib.request.urlopen(req, timeout=12) as resp:
             payload = json.loads(resp.read().decode('utf-8'))
     except Exception as e:
-        print(f'[earnings-calendar] {d} failed: {e}')
+        print(f'[earnings-calendar US] {d} failed: {e}')
         return []
 
     rows = (payload.get('data') or {}).get('rows') or []
@@ -612,36 +594,127 @@ def _fetch_nasdaq_earnings_day(d):
             'last_year_eps':  _parse_money(row.get('lastYearEPS')),
             'market_cap':     _parse_money(row.get('marketCap')),
             'num_estimates':  row.get('noOfEsts'),
-            'time':           row.get('time', ''),                  # time-pre-market | time-after-hours | time-not-supplied
+            'time':           row.get('time', ''),
             'fiscal_quarter': row.get('fiscalQuarterEnding', ''),
             'country':        'US',
         })
     return out
 
 
+def _fetch_us_earnings(days):
+    today = date.today()
+    dates = [today + timedelta(days=i) for i in range(days)]
+    all_rows = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for day_rows in ex.map(_fetch_nasdaq_earnings_day, dates):
+            all_rows.extend(day_rows)
+    return all_rows
+
+
+# ── EU / JP / HK coverage: yfinance index constituents ──
+def _fetch_one_yf_earnings(ticker, country, cutoff_date):
+    """Pull the next upcoming earnings event for a single Yahoo ticker."""
+    try:
+        t = yf.Ticker(ticker)
+        cal = t.calendar
+        if not cal or not isinstance(cal, dict):
+            return None
+
+        earnings_dates = cal.get('Earnings Date') or []
+        if not earnings_dates:
+            return None
+
+        today = date.today()
+        future_dates = [d for d in earnings_dates if isinstance(d, date) and today <= d <= cutoff_date]
+        if not future_dates:
+            return None
+        next_date = min(future_dates)
+
+        info = {}
+        try:
+            info = t.info or {}
+        except Exception:
+            pass
+
+        def _num(k):
+            v = cal.get(k)
+            if v is None:
+                return None
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        last_year_eps = None
+        # Best-effort last-year EPS from income statement
+        try:
+            trailing = info.get('trailingEps')
+            if trailing is not None:
+                last_year_eps = float(trailing)
+        except Exception:
+            pass
+
+        return {
+            'date':           next_date.isoformat(),
+            'ticker':         ticker,
+            'name':           info.get('shortName') or info.get('longName') or ticker,
+            'eps_estimate':   _num('Earnings Average'),
+            'last_year_eps':  last_year_eps,
+            'market_cap':     info.get('marketCap'),
+            'num_estimates':  None,
+            'time':           '',
+            'fiscal_quarter': '',
+            'country':        country,
+        }
+    except Exception:
+        return None
+
+
+def _fetch_regional_earnings(country, days):
+    universe = REGIONAL_UNIVERSES.get(country)
+    if not universe:
+        return []
+    cutoff = date.today() + timedelta(days=days)
+    results = []
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        futures = [ex.submit(_fetch_one_yf_earnings, t, country, cutoff) for t in universe]
+        for f in futures:
+            r = f.result()
+            if r:
+                results.append(r)
+    return results
+
+
 @app.route('/api/earnings-calendar')
 def earnings_calendar():
-    """Return all US earnings in the next `days` (1-45) via NASDAQ's API."""
+    """Return upcoming earnings for the selected country within `days`.
+
+    Query params:
+      days    — window size in days (1-45, default 14)
+      country — US | EU | JP | HK (default US)
+    """
     try:
         days = int(request.args.get('days', 14))
     except ValueError:
         days = 14
     days = max(1, min(days, 45))
+    country = (request.args.get('country') or 'US').upper()
 
     def fetch():
-        today = date.today()
-        dates = [today + timedelta(days=i) for i in range(days)]
-        all_rows = []
-        with ThreadPoolExecutor(max_workers=10) as ex:
-            for day_rows in ex.map(_fetch_nasdaq_earnings_day, dates):
-                all_rows.extend(day_rows)
-        # Sort by (date, market cap desc) so megacaps surface first within each day
-        all_rows.sort(key=lambda r: (r['date'], -(r['market_cap'] or 0), r['ticker']))
-        return all_rows
+        if country == 'US':
+            rows = _fetch_us_earnings(days)
+        else:
+            rows = _fetch_regional_earnings(country, days)
+        rows.sort(key=lambda r: (r['date'], -(r.get('market_cap') or 0), r['ticker']))
+        return rows
 
     try:
-        data = cached(f'earnings_nasdaq_{days}', fetch, ttl=1800)   # 30-min cache
-        return jsonify(data)
+        data = cached(f'earnings_{country}_{days}', fetch, ttl=1800)   # 30-min cache
+        return jsonify({
+            'rows':   data,
+            'source': 'NASDAQ' if country == 'US' else 'Yahoo Finance',
+            'country': country,
+        })
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
