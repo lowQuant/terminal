@@ -1072,15 +1072,15 @@ function renderEcoCalendar(container) {
       </div>
 
       <div class="panel function-panel">
-        <!-- Column headers overlaid above the TV events widget -->
+        <!-- Column headers overlaid above the TV events widget.
+             Track widths (60/15/15/10) place the three numeric labels
+             at 60% / 75% / 90% of the table width — approximately
+             above the widget's Actual/Forecast/Prior columns. -->
         <div class="eco-widget-headers">
-          <div class="eco-widget-headers__time">Time</div>
-          <div class="eco-widget-headers__country">Country</div>
-          <div class="eco-widget-headers__impact">Imp.</div>
-          <div class="eco-widget-headers__title">Event</div>
-          <div class="eco-widget-headers__num">Actual</div>
-          <div class="eco-widget-headers__num">Forecast</div>
-          <div class="eco-widget-headers__num">Prior</div>
+          <div></div>
+          <div class="eco-widget-headers__col">Actual</div>
+          <div class="eco-widget-headers__col">Forecast</div>
+          <div class="eco-widget-headers__col">Prior</div>
         </div>
         <div class="panel__body" id="eco-widget-container"></div>
       </div>
@@ -1174,7 +1174,7 @@ const evtsState = {
 // constituents (STOXX 50 + FTSE top / Nikkei 225 / Hang Seng).
 const EVTS_COUNTRIES = [
   { code: 'US', label: 'United States',  flag: '🇺🇸', source: 'NASDAQ',        scopeAllLabel: 'All US Companies' },
-  { code: 'EU', label: 'Europe',         flag: '🇪🇺', source: 'Yahoo Finance', scopeAllLabel: 'STOXX 50 + FTSE' },
+  { code: 'EU', label: 'Europe',         flag: '🇪🇺', source: 'Yahoo Finance', scopeAllLabel: 'STOXX Europe 600' },
   { code: 'JP', label: 'Japan',          flag: '🇯🇵', source: 'Yahoo Finance', scopeAllLabel: 'Nikkei 225' },
   { code: 'HK', label: 'Hong Kong',      flag: '🇭🇰', source: 'Yahoo Finance', scopeAllLabel: 'Hang Seng' },
 ];
