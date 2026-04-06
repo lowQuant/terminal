@@ -17,6 +17,7 @@ from functions.evts import evts_bp
 from functions.fx import fx_bp
 from functions.most import most_bp
 from functions.mov import mov_bp
+from functions.eqs import eqs_bp
 from functions._countries import COUNTRIES, all_with_eco, all_with_scanner, to_json
 
 # ── Shared countries endpoint ──
@@ -49,6 +50,7 @@ ALL_BLUEPRINTS = [
     fx_bp,
     most_bp,
     mov_bp,
+    eqs_bp,
 ]
 
 

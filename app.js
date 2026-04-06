@@ -2203,58 +2203,69 @@ function renderEquityScreener(container) {
     </div>
   `;
 
-  // Populate market dropdown from country registry
+  // Populate market dropdown from the EQS markets endpoint (includes tv_scanner slug)
   const select = $('#eqs-market-select');
-  getScannerCountries().then((countries) => {
-    if (!select) return;
+  fetch('/api/eqs/markets').then(r => r.ok ? r.json() : []).then((markets) => {
+    if (!select || !markets.length) return;
     const regions = { americas: 'Americas', europe: 'Europe', asia_pacific: 'Asia Pacific', middle_east_africa: 'Middle East & Africa' };
     const grouped = {};
-    // Only include countries that have a tv_scanner slug (skip EU aggregate)
-    countries.filter((c) => c.code !== 'EU').forEach((c) => {
-      (grouped[c.region] = grouped[c.region] || []).push(c);
-    });
+    markets.forEach((m) => (grouped[m.region] = grouped[m.region] || []).push(m));
     let html = '';
     for (const [key, label] of Object.entries(regions)) {
       if (!grouped[key]) continue;
       html += `<optgroup label="${escHtml(label)}">`;
-      grouped[key].forEach((c) => {
-        // We need the tv_scanner slug as value; fetch it from /api/countries/scanner
-        // The response includes code, name, flag, region but not tv_scanner.
-        // Map code → scanner slug via a known mapping.
-        const slug = _countryCodeToScanner(c.code);
-        if (!slug) return;
-        html += `<option value="${escHtml(slug)}" ${slug === eqsState.market ? 'selected' : ''}>${c.flag} ${escHtml(c.name)}</option>`;
+      grouped[key].forEach((m) => {
+        html += `<option value="${escHtml(m.tv_scanner)}" ${m.tv_scanner === eqsState.market ? 'selected' : ''}>${m.flag} ${escHtml(m.name)}</option>`;
       });
       html += `</optgroup>`;
     }
     select.innerHTML = html;
-  });
+  }).catch(() => {});
 
   select?.addEventListener('change', () => {
     eqsState.market = select.value;
     injectEqsWidget();
   });
 
+  // Intercept TV widget symbol clicks via postMessage. TradingView
+  // widgets send messages like {name: "tv-widget-symbol-click",
+  // data: {symbol: "NASDAQ:AAPL"}} when a symbol link is clicked.
+  // We catch these and route to our Overview instead of letting the
+  // iframe navigate to tradingview.com.
+  _installTvClickInterceptor();
+
   setDataSource('TradingView');
   injectEqsWidget();
 }
 
-// Map country code → TradingView scanner slug. The /api/countries/scanner
-// response doesn't include the slug directly, so we maintain a light map.
-// If we need more, we can expose tv_scanner in the countries API.
-function _countryCodeToScanner(code) {
-  const map = {
-    US: 'america', CA: 'canada', MX: 'mexico', BR: 'brazil',
-    GB: 'uk', DE: 'germany', FR: 'france', NL: 'netherlands',
-    IT: 'italy', ES: 'spain', CH: 'switzerland', BE: 'belgium',
-    AT: 'austria', PT: 'portugal', IE: 'ireland', DK: 'denmark',
-    SE: 'sweden', FI: 'finland', NO: 'norway', PL: 'poland', GR: 'greece',
-    JP: 'japan', CN: 'china', HK: 'hongkong', KR: 'korea', TW: 'taiwan',
-    IN: 'india', AU: 'australia', NZ: 'new-zealand', SG: 'singapore',
-    ID: 'indonesia', TH: 'thailand',
-    IL: 'israel', SA: 'saudi-arabia', ZA: 'south-africa', TR: 'turkey',
-  };
-  return map[code] || null;
+// Installs a one-time global listener that intercepts TradingView widget
+// symbol clicks and loads the symbol in our terminal instead.
+let _tvInterceptorInstalled = false;
+function _installTvClickInterceptor() {
+  if (_tvInterceptorInstalled) return;
+  _tvInterceptorInstalled = true;
+
+  window.addEventListener('message', (event) => {
+    // TV widgets post JSON messages for various events
+    let msg;
+    try {
+      msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+    } catch { return; }
+
+    // Different widget versions use different message shapes
+    const symbol = msg?.symbolInfo?.name
+      || msg?.data?.symbol
+      || (msg?.name === 'tv-widget-symbol-click' && msg?.data);
+
+    if (typeof symbol === 'string' && symbol.includes(':')) {
+      // Prevent the widget from navigating away
+      event.preventDefault?.();
+      event.stopPropagation?.();
+
+      // Load in our terminal
+      loadSymbol(symbol);
+    }
+  });
 }
 
 function injectEqsWidget() {
