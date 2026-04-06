@@ -2590,6 +2590,9 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.evts-table__num--positive { color: var(--green); }
+.evts-table__num--negative { color: var(--red); }
+
 @media (max-width: 900px) {
   .evts-table__header,
   .evts-table__row {
@@ -2644,6 +2647,98 @@ body {
   background: var(--bg-panel);
   border-color: var(--border-primary);
   color: var(--text-secondary);
+}
+
+/* ── MOV Table (8-column layout) ── */
+.mov-table {
+  overflow-y: auto;
+  height: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.mov-table__header,
+.mov-table__row {
+  display: grid;
+  grid-template-columns: 90px 1fr 80px 80px 80px 90px 90px 120px;
+  gap: 10px;
+  padding: 10px 16px;
+  align-items: center;
+}
+
+.mov-table__header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.mov-table__row {
+  border-bottom: 1px solid var(--border-primary);
+  cursor: pointer;
+  transition: background 0.12s var(--ease);
+}
+
+.mov-table__row:hover {
+  background: var(--bg-panel-hover);
+}
+
+.mov-table__ticker {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.mov-table__name {
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mov-table__num {
+  color: var(--text-primary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.mov-table__positive { color: var(--green); }
+.mov-table__negative { color: var(--red); }
+
+.mov-table__sector {
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 1100px) {
+  .mov-table__header,
+  .mov-table__row {
+    grid-template-columns: 80px 1fr 70px 70px 70px 80px;
+  }
+  /* Hide Volume and Sector on narrow screens */
+  .mov-table__header > *:nth-child(n+7),
+  .mov-table__row    > *:nth-child(n+7) { display: none; }
+}
+
+@media (max-width: 800px) {
+  .mov-table__header,
+  .mov-table__row {
+    grid-template-columns: 70px 1fr 60px 60px;
+  }
+  .mov-table__header > *:nth-child(n+5),
+  .mov-table__row    > *:nth-child(n+5) { display: none; }
 }
 
 /* ── Column Filters (reusable min/max filter inputs) ── */
