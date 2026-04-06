@@ -2646,6 +2646,67 @@ body {
   color: var(--text-secondary);
 }
 
+/* ── Column Filters (reusable min/max filter inputs) ── */
+.function-toolbar--filters {
+  gap: 10px;
+}
+
+.filter-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex: 1;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.filter-group__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  margin-right: 2px;
+}
+
+.filter-group__input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  width: 70px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s var(--ease);
+}
+
+.filter-group__input::placeholder {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.filter-group__input:focus {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.filter-group__sep {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+@media (max-width: 900px) {
+  .filter-group__input { width: 55px; padding: 3px 6px; }
+}
+
 /* ── EVTS Country Dropdown ── */
 .evts-country-select {
   background: var(--bg-input);

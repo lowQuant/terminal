@@ -1088,6 +1088,93 @@ function injectEcoWidget() {
 
 
 // ═══════════════════════════════════════
+// REUSABLE: COLUMN FILTERS
+// ═══════════════════════════════════════
+//
+// Generic min/max filter system for function tables. Each filterable
+// numeric column gets a pair of inputs. The filter state is a plain
+// object: { column_key: { min: Number|null, max: Number|null }, … }.
+//
+// Usage:
+//   renderColumnFilters(containerId, columnsSpec, filterState, onChange)
+//
+// columnsSpec is an array of { key, label, placeholder }.
+// onChange is called after any filter value changes so the table can
+// re-render with the new filters applied.
+
+function renderColumnFilters(containerId, columns, filterState, onChange) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  container.innerHTML = columns.map((col) => {
+    const f = filterState[col.key] || {};
+    return `
+      <div class="filter-group">
+        <span class="filter-group__label">${escHtml(col.label)}</span>
+        <input class="filter-group__input" type="text"
+               data-filter-key="${col.key}" data-filter-bound="min"
+               placeholder="Min" value="${f.min != null ? f.min : ''}"
+               title="Min ${col.label}">
+        <span class="filter-group__sep">–</span>
+        <input class="filter-group__input" type="text"
+               data-filter-key="${col.key}" data-filter-bound="max"
+               placeholder="Max" value="${f.max != null ? f.max : ''}"
+               title="Max ${col.label}">
+      </div>
+    `;
+  }).join('');
+
+  // Wire input events (debounced)
+  const debouncedApply = debounce(() => onChange(), 400);
+  container.querySelectorAll('.filter-group__input').forEach((input) => {
+    input.addEventListener('input', () => {
+      const key = input.dataset.filterKey;
+      const bound = input.dataset.filterBound;
+      if (!filterState[key]) filterState[key] = {};
+      const parsed = parseFilterValue(input.value.trim());
+      filterState[key][bound] = parsed;
+      debouncedApply();
+    });
+  });
+}
+
+/**
+ * Parse a human-entered filter value that may contain suffixes like
+ * K, M, B, T (e.g. "1B" → 1_000_000_000, "500M" → 500_000_000).
+ * Returns a number or null.
+ */
+function parseFilterValue(s) {
+  if (!s) return null;
+  s = s.replace(/[$,\s]/g, '');
+  const multipliers = { K: 1e3, M: 1e6, B: 1e9, T: 1e12 };
+  const last = s.slice(-1).toUpperCase();
+  if (multipliers[last]) {
+    const num = parseFloat(s.slice(0, -1));
+    return isNaN(num) ? null : num * multipliers[last];
+  }
+  const num = parseFloat(s);
+  return isNaN(num) ? null : num;
+}
+
+/**
+ * Apply column filters to an array of rows.
+ * filterState: { key: { min, max }, … }
+ * Returns filtered array.
+ */
+function applyColumnFilters(rows, filterState) {
+  return rows.filter((row) => {
+    for (const [key, bounds] of Object.entries(filterState)) {
+      const val = row[key];
+      if (val == null) continue; // don't filter out rows with missing data
+      if (bounds.min != null && val < bounds.min) return false;
+      if (bounds.max != null && val > bounds.max) return false;
+    }
+    return true;
+  });
+}
+
+
+// ═══════════════════════════════════════
 // EVTS — Corporate Events (Earnings Calendar)
 // ═══════════════════════════════════════
 //
@@ -1101,8 +1188,17 @@ let _evtsData = null;
 const evtsState = {
   days: 14,
   scope: 'all',          // 'all' | 'watchlist'
-  country: 'US',         // 'US' | 'EU' | 'JP' | 'HK'
+  country: 'US',         // any code from _countries.py
+  filters: {},           // { market_cap: {min, max}, eps_estimate: {min, max}, … }
 };
+
+// Filterable numeric columns in EVTS. Each entry generates a min/max
+// filter pair in the toolbar. Adding a column here = instant filter.
+const EVTS_FILTER_COLUMNS = [
+  { key: 'market_cap',    label: 'Market Cap',  fmt: fmtBigNum, placeholder: 'e.g. 1B' },
+  { key: 'eps_estimate',  label: 'EPS Est.',    fmt: (v) => v != null ? v.toFixed(2) : '—', placeholder: 'e.g. 0.5' },
+  { key: 'last_year_eps', label: 'Last Yr EPS', fmt: (v) => v != null ? v.toFixed(2) : '—', placeholder: 'e.g. 1.0' },
+];
 
 // Country lists are fetched from the backend registry (/api/countries/*).
 // Cached in state so we only fetch once per session.
@@ -1167,6 +1263,11 @@ function renderEventsCalendar(container) {
         </div>
       </div>
 
+      <div class="function-toolbar function-toolbar--filters" id="evts-filters-bar">
+        <div class="function-toolbar__label">Filters</div>
+        <div class="filter-inputs" id="evts-filter-inputs"></div>
+      </div>
+
       <div class="panel function-panel">
         <div class="panel__body" id="evts-table-container">
           <div class="evts-loading">
@@ -1177,6 +1278,9 @@ function renderEventsCalendar(container) {
       </div>
     </div>
   `;
+
+  // Render the filter inputs based on EVTS_FILTER_COLUMNS
+  renderColumnFilters('evts-filter-inputs', EVTS_FILTER_COLUMNS, evtsState.filters, () => renderEvtsTable());
 
   // Wire scope + range filters
   $$('#evts-scope-filter .country-btn').forEach((btn) => {
@@ -1299,12 +1403,13 @@ function renderEvtsTable() {
   const container = $('#evts-table-container');
   if (!container || !_evtsData) return;
 
-  // Apply scope filter
+  // Apply scope filter, then column filters
   let rows = _evtsData;
   if (evtsState.scope === 'watchlist') {
     const wlSet = new Set(state.watchlist.map((w) => w.symbol.toUpperCase()));
     rows = rows.filter((e) => wlSet.has((e.ticker || '').toUpperCase()));
   }
+  rows = applyColumnFilters(rows, evtsState.filters);
 
   if (rows.length === 0) {
     const countries = _scannerCountries || [];
