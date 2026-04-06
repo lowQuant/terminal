@@ -1,15 +1,17 @@
-"""MOV — Top Movers (Gainers, Losers, Most Active, Pre-Market).
+"""MOV — Index Movers.
 
-Uses the TradingView scanner API to fetch daily movers in a single call
-per market. Four views are supported:
+Shows which stocks are driving a selected index up or down, ranked by
+their contribution to the index's move. Bloomberg-style ``INDU <INDEX>
+MOV <GO>`` equivalent.
 
-    gainers    — sorted by change% descending
-    losers     — sorted by change% ascending
-    active     — sorted by relative volume descending
-    premarket  — sorted by premarket change% (US only)
+Uses the TradingView scanner to fetch constituent data (change%, market
+cap, close) for the index's market, then estimates each stock's
+contribution as ``change% × market_cap_weight``.
 
-Each view returns the top N stocks by the relevant metric, filtered to
-primary-listed equities with a minimum market cap.
+True index-point contributions require the exact index methodology
+(divisor, free-float, capping rules) which varies per index and isn't
+publicly available. Our market-cap-weighted approximation is close
+enough for the top/bottom movers ranking.
 """
 
 import json
@@ -38,177 +40,159 @@ _UA = {
     'Referer': 'https://www.tradingview.com/',
 }
 
-# Columns requested per view. Order matters — position maps to d[i].
-BASE_COLUMNS = [
+# Major indices mapped to their scanner market + a readable label.
+# The scanner returns all stocks for that market; we approximate
+# the index by taking the top N by market cap (a reasonable proxy
+# for index constituents in cap-weighted indices).
+INDICES = {
+    # US
+    'SPX':   {'market': 'america', 'label': 'S&P 500',          'top_n': 500},
+    'NDX':   {'market': 'america', 'label': 'NASDAQ 100',       'top_n': 100},
+    'DJI':   {'market': 'america', 'label': 'Dow Jones 30',     'top_n': 30},
+    # Europe
+    'SX5E':  {'market': 'germany', 'label': 'Euro Stoxx 50',    'top_n': 50,  'markets': ['germany', 'france', 'netherlands', 'italy', 'spain']},
+    'DAX':   {'market': 'germany', 'label': 'DAX 40',           'top_n': 40},
+    'FTSE':  {'market': 'uk',      'label': 'FTSE 100',         'top_n': 100},
+    'CAC':   {'market': 'france',  'label': 'CAC 40',           'top_n': 40},
+    # Asia
+    'NKY':   {'market': 'japan',   'label': 'Nikkei 225',       'top_n': 225},
+    'HSI':   {'market': 'hongkong','label': 'Hang Seng',        'top_n': 80},
+}
+
+COLUMNS = [
     'name',                        # 0
     'description',                 # 1
     'close',                       # 2
     'change',                      # 3  (% change today)
-    'volume',                      # 4
-    'relative_volume_10d_calc',    # 5
+    'change_abs',                  # 4  (absolute price change)
+    'volume',                      # 5
     'market_cap_basic',            # 6
     'sector',                      # 7
     'country',                     # 8
 ]
 
-PREMARKET_COLUMNS = BASE_COLUMNS + [
-    'premarket_change',            # 9   (pre-market % change)
-    'premarket_volume',            # 10
-    'premarket_gap',               # 11  (gap from prior close %)
-    'premarket_close',             # 12
-]
 
-# Sort key per view
-VIEW_CONFIG = {
-    'gainers':   {'sort': 'change',                    'order': 'desc', 'premarket': False},
-    'losers':    {'sort': 'change',                    'order': 'asc',  'premarket': False},
-    'active':    {'sort': 'relative_volume_10d_calc',  'order': 'desc', 'premarket': False},
-    'premarket': {'sort': 'premarket_change',          'order': 'desc', 'premarket': True},
-}
+def _fetch_index_movers(index_key: str) -> List[Dict]:
+    cfg = INDICES.get(index_key)
+    if not cfg:
+        return []
 
-MIN_MCAP = 50_000_000  # $50M floor to filter penny stocks
+    markets = cfg.get('markets', [cfg['market']])
+    top_n = cfg.get('top_n', 100)
 
+    def _fetch_market(slug):
+        body = {
+            'filter': [
+                {'left': 'type',       'operation': 'equal',    'right': 'stock'},
+                {'left': 'subtype',    'operation': 'in_range',
+                    'right': ['common', 'foreign-issuer']},
+                {'left': 'is_primary', 'operation': 'equal',    'right': True},
+                {'left': 'market_cap_basic', 'operation': 'greater', 'right': 50_000_000},
+            ],
+            'columns': COLUMNS,
+            'sort':    {'sortBy': 'market_cap_basic', 'sortOrder': 'desc'},
+            'range':   [0, top_n if len(markets) == 1 else top_n // len(markets) + 20],
+        }
+        data = json.dumps(body).encode('utf-8')
+        req = urllib.request.Request(
+            SCANNER_URL.format(market=slug),
+            data=data, headers=_UA, method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+        return payload.get('data') or []
 
-def _fetch_movers(market_slug: str, view: str, limit: int = 100) -> List[Dict]:
-    cfg = VIEW_CONFIG.get(view, VIEW_CONFIG['gainers'])
-    columns = PREMARKET_COLUMNS if cfg['premarket'] else BASE_COLUMNS
+    from concurrent.futures import ThreadPoolExecutor
 
-    filters = [
-        {'left': 'type',       'operation': 'equal',    'right': 'stock'},
-        {'left': 'subtype',    'operation': 'in_range',
-            'right': ['common', 'foreign-issuer']},
-        {'left': 'is_primary', 'operation': 'equal',    'right': True},
-        {'left': 'market_cap_basic', 'operation': 'greater', 'right': MIN_MCAP},
-    ]
-    # For losers, only show negative change
-    if view == 'losers':
-        filters.append({'left': 'change', 'operation': 'less', 'right': 0})
-    # For gainers, only positive
-    elif view == 'gainers':
-        filters.append({'left': 'change', 'operation': 'greater', 'right': 0})
-    # Premarket: need a value
-    elif view == 'premarket':
-        filters.append({'left': 'premarket_change', 'operation': 'nempty'})
+    all_raw = []
+    with ThreadPoolExecutor(max_workers=min(8, len(markets))) as ex:
+        for rows in ex.map(_fetch_market, markets):
+            all_raw.extend(rows)
 
-    body = {
-        'filter':  filters,
-        'columns': columns,
-        'sort':    {'sortBy': cfg['sort'], 'sortOrder': cfg['order']},
-        'range':   [0, limit],
-    }
-
-    data = json.dumps(body).encode('utf-8')
-    req = urllib.request.Request(
-        SCANNER_URL.format(market=market_slug),
-        data=data, headers=_UA, method='POST',
-    )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        payload = json.loads(resp.read().decode('utf-8'))
-
-    rows = payload.get('data') or []
-    out = []
-    for row in rows:
+    # Sort by market cap desc, take top_n
+    parsed = []
+    for row in all_raw:
         tv_sym = row.get('s') or ''
         d = row.get('d') or []
         if len(d) < 9 or not tv_sym:
             continue
+        mcap = d[6] if isinstance(d[6], (int, float)) else 0
+        chg = d[3] if isinstance(d[3], (int, float)) else 0
+        parsed.append({
+            'tv_symbol': tv_sym,
+            'd': d,
+            'mcap': mcap,
+            'change': chg,
+        })
 
+    parsed.sort(key=lambda r: -r['mcap'])
+    parsed = parsed[:top_n]
+
+    # Compute contribution = change% × weight (market-cap weighted)
+    total_mcap = sum(r['mcap'] for r in parsed) or 1
+    results = []
+    for r in parsed:
+        d = r['d']
         tv_name = (d[0] or '').replace('_', '-')
         country_name = d[8] or ''
         suffix = yf_suffix_for_name(country_name)
-        if not suffix:
-            c = by_tv_scanner(market_slug)
-            suffix = c.yf_suffix if c else ''
 
-        entry = {
-            'ticker':        f'{tv_name}{suffix}',
-            'tv_symbol':     tv_sym,
-            'name':          (d[1] or tv_name).strip(),
-            'close':         d[2] if isinstance(d[2], (int, float)) else None,
-            'change':        d[3] if isinstance(d[3], (int, float)) else None,
-            'volume':        d[4] if isinstance(d[4], (int, float)) else None,
-            'rel_volume':    d[5] if isinstance(d[5], (int, float)) else None,
-            'market_cap':    d[6] if isinstance(d[6], (int, float)) else None,
-            'sector':        d[7] or '',
-            'country':       country_name,
-        }
+        weight = r['mcap'] / total_mcap
+        contribution = r['change'] * weight  # approx index-point contribution
 
-        # Pre-market fields (only present in premarket view)
-        if cfg['premarket'] and len(d) > 12:
-            entry['premarket_change'] = d[9] if isinstance(d[9], (int, float)) else None
-            entry['premarket_volume'] = d[10] if isinstance(d[10], (int, float)) else None
-            entry['premarket_gap']    = d[11] if isinstance(d[11], (int, float)) else None
-            entry['premarket_close']  = d[12] if isinstance(d[12], (int, float)) else None
-
-        out.append(entry)
-    return out
-
-
-def _fetch_region_movers(country_code: str, view: str, limit: int) -> List[Dict]:
-    """Fetch movers for a region (may span multiple scanner slugs)."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    slugs = region_scanner_slugs(country_code)
-    if not slugs:
-        return []
-
-    def _safe(slug):
-        try:
-            return _fetch_movers(slug, view, limit=limit)
-        except Exception as e:
-            print(f'[mov] {slug}/{view} failed: {e}')
-            return []
-
-    all_rows = []
-    with ThreadPoolExecutor(max_workers=min(8, len(slugs))) as ex:
-        for rows in ex.map(_safe, slugs):
-            all_rows.extend(rows)
-
-    # Re-sort the merged results by the view's sort key
-    cfg = VIEW_CONFIG.get(view, VIEW_CONFIG['gainers'])
-    sort_key = cfg['sort']
-    reverse = cfg['order'] == 'desc'
-    all_rows.sort(key=lambda r: r.get(sort_key) or 0, reverse=reverse)
-    return all_rows[:limit]
-
-
-@mov_bp.route('/api/movers')
-def movers():
-    """Return top movers for a region/view.
-
-    Query params:
-      country — US | EU | JP | HK | DE | GB | … (default US)
-      view    — gainers | losers | active | premarket (default gainers)
-      limit   — max results (1-200, default 50)
-    """
-    country = (request.args.get('country') or 'US').upper()
-    view = (request.args.get('view') or 'gainers').lower()
-    try:
-        limit = int(request.args.get('limit', 50))
-    except ValueError:
-        limit = 50
-    limit = max(1, min(limit, 200))
-
-    if view not in VIEW_CONFIG:
-        return jsonify({'error': f'Unknown view: {view}'}), 400
-
-    # Pre-market is US-only
-    if view == 'premarket' and country != 'US':
-        return jsonify({
-            'rows': [], 'source': 'TradingView', 'country': country,
-            'view': view, 'note': 'Pre-market data is US-only',
+        results.append({
+            'ticker':       f'{tv_name}{suffix}',
+            'tv_symbol':    r['tv_symbol'],
+            'name':         (d[1] or tv_name).strip(),
+            'close':        d[2] if isinstance(d[2], (int, float)) else None,
+            'change':       r['change'],
+            'change_abs':   d[4] if isinstance(d[4], (int, float)) else None,
+            'volume':       d[5] if isinstance(d[5], (int, float)) else None,
+            'market_cap':   r['mcap'],
+            'sector':       d[7] or '',
+            'country':      country_name,
+            'weight':       round(weight * 100, 2),        # % of index
+            'contribution': round(contribution, 4),         # approx index contribution
         })
 
+    # Sort by absolute contribution desc (biggest movers first)
+    results.sort(key=lambda r: -abs(r['contribution']))
+    return results
+
+
+@mov_bp.route('/api/index-movers')
+def index_movers():
+    """Return index movers for a given index.
+
+    Query params:
+      index — SPX | NDX | DJI | SX5E | DAX | FTSE | CAC | NKY | HSI
+      sort  — contribution (default) | gainers | losers
+    """
+    index_key = (request.args.get('index') or 'SPX').upper()
+    sort_mode = (request.args.get('sort') or 'contribution').lower()
+
+    if index_key not in INDICES:
+        return jsonify({'error': f'Unknown index: {index_key}',
+                        'available': list(INDICES.keys())}), 400
+
     def fetch():
-        return _fetch_region_movers(country, view, limit)
+        return _fetch_index_movers(index_key)
 
     try:
-        data = cached(f'movers_{country}_{view}_{limit}', fetch, ttl=120)  # 2-min cache
+        data = cached(f'index_movers_{index_key}', fetch, ttl=120)  # 2-min cache
+
+        # Apply sort
+        if sort_mode == 'gainers':
+            data = sorted(data, key=lambda r: -(r.get('contribution') or 0))
+        elif sort_mode == 'losers':
+            data = sorted(data, key=lambda r: r.get('contribution') or 0)
+        # else: default is already by absolute contribution
+
         return jsonify({
-            'rows':    data,
-            'source':  'TradingView',
-            'country': country,
-            'view':    view,
+            'rows':   data,
+            'source': 'TradingView',
+            'index':  index_key,
+            'label':  INDICES[index_key]['label'],
         })
     except Exception as e:
         traceback.print_exc()

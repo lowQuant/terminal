@@ -215,10 +215,17 @@ const FUNCTIONS = [
     implemented: false,
   },
   {
+    code: 'MOST',
+    name: 'Most Active',
+    desc: 'Gainers, losers, volume leaders & pre-market',
+    aliases: ['MOST', 'ACTIVE', 'GAINERS', 'LOSERS', 'PREMARKET'],
+    implemented: true,
+  },
+  {
     code: 'MOV',
-    name: 'Top Movers',
-    desc: 'Gainers, losers, most active & pre-market',
-    aliases: ['MOV', 'MOVERS', 'GAINERS', 'LOSERS', 'MOST', 'ACTIVE', 'PREMARKET'],
+    name: 'Index Movers',
+    desc: 'Which stocks drive an index up or down',
+    aliases: ['MOV', 'MOVERS', 'INDEX'],
     implemented: true,
   },
   {
@@ -260,7 +267,8 @@ function openFunction(code) {
   switch (code) {
     case 'ECO':  renderEcoCalendar(dashboard); break;
     case 'EVTS': renderEventsCalendar(dashboard); break;
-    case 'MOV':  renderTopMovers(dashboard); break;
+    case 'MOST': renderMostActive(dashboard); break;
+    case 'MOV':  renderIndexMovers(dashboard); break;
   }
   updateStatusBar();
 }
@@ -1604,10 +1612,10 @@ function fmtEvtsShortDate(iso) {
 }
 
 // ═══════════════════════════════════════
-// MOV — Top Movers
+// MOST — Most Active
 // ═══════════════════════════════════════
 
-const movState = {
+const mostState = {
   country: 'US',
   view: 'gainers',      // gainers | losers | active | premarket
   limit: 50,
@@ -1616,51 +1624,51 @@ const movState = {
   fxRates: null,
 };
 
-const MOV_VIEWS = [
+const MOST_VIEWS = [
   { key: 'gainers',   label: 'Gainers' },
   { key: 'losers',    label: 'Losers' },
   { key: 'active',    label: 'Most Active' },
   { key: 'premarket', label: 'Pre-Market' },
 ];
 
-const MOV_FILTER_COLUMNS = [
+const MOST_FILTER_COLUMNS = [
   { key: 'market_cap', label: 'Market Cap', placeholder: 'e.g. 1B' },
   { key: 'change',     label: 'Change %',   placeholder: 'e.g. 5' },
   { key: 'rel_volume', label: 'Rel Vol',    placeholder: 'e.g. 2' },
 ];
 
-let _movData = null;
+let _mostData = null;
 
-function renderTopMovers(container) {
+function renderMostActive(container) {
   container.className = 'dashboard dashboard--function';
   container.innerHTML = `
     <div class="function-wrapper">
       <header class="function-header">
         <div class="function-header__title-row">
-          <div class="function-header__code">MOV</div>
+          <div class="function-header__code">MOST</div>
           <div class="function-header__name">
-            <div class="function-header__name-main">Top Movers</div>
-            <div class="function-header__name-sub" id="mov-subtitle">Gainers, losers, volume & pre-market</div>
+            <div class="function-header__name-main">Most Active</div>
+            <div class="function-header__name-sub" id="most-subtitle">Gainers, losers, volume leaders & pre-market</div>
           </div>
         </div>
       </header>
 
       <div class="function-toolbar">
         <div class="function-toolbar__label">Country</div>
-        <select class="evts-country-select" id="mov-country-select" style="min-width:180px">
+        <select class="evts-country-select" id="most-country-select" style="min-width:180px">
           <option value="US">🇺🇸 United States</option>
         </select>
 
         <div class="function-toolbar__label" style="margin-left:14px">View</div>
-        <div class="range-filter" id="mov-view-filter">
-          ${MOV_VIEWS.map((v) => `
-            <button class="country-btn ${v.key === movState.view ? 'country-btn--active' : ''}"
+        <div class="range-filter" id="most-view-filter">
+          ${MOST_VIEWS.map((v) => `
+            <button class="country-btn ${v.key === mostState.view ? 'country-btn--active' : ''}"
                     data-view="${v.key}">${v.label}</button>
           `).join('')}
         </div>
 
         <div class="function-toolbar__label" style="margin-left:14px">Currency</div>
-        <select class="evts-country-select" id="mov-currency-select" style="min-width:100px">
+        <select class="evts-country-select" id="most-currency-select" style="min-width:100px">
           <option value="">Local</option>
           <option value="USD">USD</option>
           <option value="EUR">EUR</option>
@@ -1670,13 +1678,13 @@ function renderTopMovers(container) {
         </select>
       </div>
 
-      <div class="function-toolbar function-toolbar--filters" id="mov-filters-bar">
+      <div class="function-toolbar function-toolbar--filters" id="most-filters-bar">
         <div class="function-toolbar__label">Filters</div>
-        <div class="filter-inputs" id="mov-filter-inputs"></div>
+        <div class="filter-inputs" id="most-filter-inputs"></div>
       </div>
 
       <div class="panel function-panel">
-        <div class="panel__body" id="mov-table-container">
+        <div class="panel__body" id="most-table-container">
           <div class="evts-loading">
             <div class="search-loading__spinner"></div>
             <span>Loading movers…</span>
@@ -1687,47 +1695,47 @@ function renderTopMovers(container) {
   `;
 
   // Filters
-  renderColumnFilters('mov-filter-inputs', MOV_FILTER_COLUMNS, movState.filters, () => renderMovTable());
+  renderColumnFilters('most-filter-inputs', MOST_FILTER_COLUMNS, mostState.filters, () => renderMostTable());
 
   // View tabs
-  $$('#mov-view-filter .country-btn').forEach((btn) => {
+  $$('#most-view-filter .country-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      $$('#mov-view-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
+      $$('#most-view-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
       btn.classList.add('country-btn--active');
-      movState.view = btn.dataset.view;
-      loadMovData();
+      mostState.view = btn.dataset.view;
+      loadMostData();
     });
   });
 
   // Country dropdown
-  const countrySelect = $('#mov-country-select');
+  const countrySelect = $('#most-country-select');
   if (countrySelect) {
     countrySelect.addEventListener('change', () => {
-      movState.country = countrySelect.value;
+      mostState.country = countrySelect.value;
       // Hide pre-market tab for non-US
-      const pmBtn = document.querySelector('#mov-view-filter [data-view="premarket"]');
-      if (pmBtn) pmBtn.style.display = movState.country === 'US' ? '' : 'none';
-      if (movState.view === 'premarket' && movState.country !== 'US') {
-        movState.view = 'gainers';
-        $$('#mov-view-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
-        document.querySelector('#mov-view-filter [data-view="gainers"]').classList.add('country-btn--active');
+      const pmBtn = document.querySelector('#most-view-filter [data-view="premarket"]');
+      if (pmBtn) pmBtn.style.display = mostState.country === 'US' ? '' : 'none';
+      if (mostState.view === 'premarket' && mostState.country !== 'US') {
+        mostState.view = 'gainers';
+        $$('#most-view-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
+        document.querySelector('#most-view-filter [data-view="gainers"]').classList.add('country-btn--active');
       }
-      loadMovData();
+      loadMostData();
     });
   }
 
   // Currency dropdown
-  const ccySelect = $('#mov-currency-select');
+  const ccySelect = $('#most-currency-select');
   if (ccySelect) {
     ccySelect.addEventListener('change', async () => {
-      movState.displayCurrency = ccySelect.value;
-      if (movState.displayCurrency && !movState.fxRates) {
+      mostState.displayCurrency = ccySelect.value;
+      if (mostState.displayCurrency && !mostState.fxRates) {
         try {
           const resp = await fetch('/api/fx/rates');
-          if (resp.ok) movState.fxRates = (await resp.json()).rates || {};
+          if (resp.ok) mostState.fxRates = (await resp.json()).rates || {};
         } catch (e) { console.warn('FX fetch failed:', e); }
       }
-      renderMovTable();
+      renderMostTable();
     });
   }
 
@@ -1742,36 +1750,36 @@ function renderTopMovers(container) {
         if (!grouped[key]) continue;
         html += `<optgroup label="${escHtml(label)}">`;
         grouped[key].forEach((c) => {
-          html += `<option value="${escHtml(c.code)}" ${c.code === movState.country ? 'selected' : ''}>${c.flag} ${escHtml(c.name)}</option>`;
+          html += `<option value="${escHtml(c.code)}" ${c.code === mostState.country ? 'selected' : ''}>${c.flag} ${escHtml(c.name)}</option>`;
         });
         html += `</optgroup>`;
       }
       countrySelect.innerHTML = html;
     }
-    loadMovData();
+    loadMostData();
   });
 }
 
-async function loadMovData() {
-  const container = $('#mov-table-container');
+async function loadMostData() {
+  const container = $('#most-table-container');
   if (!container) return;
   container.innerHTML = `
     <div class="evts-loading">
       <div class="search-loading__spinner"></div>
-      <span>Loading ${escHtml(movState.view)}…</span>
+      <span>Loading ${escHtml(mostState.view)}…</span>
     </div>
   `;
 
   try {
     const resp = await fetch(
-      `/api/movers?country=${movState.country}&view=${movState.view}&limit=${movState.limit}`
+      `/api/movers?country=${mostState.country}&view=${mostState.view}&limit=${mostState.limit}`
     );
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const payload = await resp.json();
     if (payload.error) throw new Error(payload.error);
-    _movData = payload.rows || [];
+    _mostData = payload.rows || [];
     setDataSource(payload.source || 'TradingView');
-    renderMovTable();
+    renderMostTable();
   } catch (err) {
     console.error('Failed to load movers:', err);
     container.innerHTML = `
@@ -1784,27 +1792,27 @@ async function loadMovData() {
   }
 }
 
-function renderMovTable() {
-  const container = $('#mov-table-container');
-  if (!container || !_movData) return;
+function renderMostTable() {
+  const container = $('#most-table-container');
+  if (!container || !_mostData) return;
 
-  const isPremarket = movState.view === 'premarket';
-  const toCcy = movState.displayCurrency;
+  const isPremarket = mostState.view === 'premarket';
+  const toCcy = mostState.displayCurrency;
 
   // FX-convert then filter
-  let rows = _movData.map((e) => {
+  let rows = _mostData.map((e) => {
     let fx = 1;
-    if (toCcy && movState.fxRates) {
+    if (toCcy && mostState.fxRates) {
       const rc = (_scannerCountries || []).find((c) => c.name === e.country);
       const fromCcy = (rc && rc.currency) || 'USD';
-      if (fromCcy !== toCcy) fx = _fxConvertRate(fromCcy, toCcy, movState.fxRates);
+      if (fromCcy !== toCcy) fx = _fxConvertRate(fromCcy, toCcy, mostState.fxRates);
     }
     return { ...e, _market_cap: e.market_cap != null ? e.market_cap * fx : null };
   });
 
   // Apply column filters on converted values
   rows = rows.filter((row) => {
-    for (const [key, bounds] of Object.entries(movState.filters)) {
+    for (const [key, bounds] of Object.entries(mostState.filters)) {
       const val = key === 'market_cap' ? row._market_cap : row[key];
       if (val == null) continue;
       if (bounds.min != null && val < bounds.min) return false;
@@ -1819,37 +1827,223 @@ function renderMovTable() {
   }
 
   // Build header + rows
-  let html = `<div class="mov-table">
-    <div class="mov-table__header">
+  let html = `<div class="most-table">
+    <div class="most-table__header">
+      <div>#</div>
       <div>Ticker</div>
       <div>Company</div>
-      <div class="mov-table__num">Price</div>
-      <div class="mov-table__num">${isPremarket ? 'PM Chg%' : 'Change%'}</div>
-      <div class="mov-table__num">${isPremarket ? 'PM Gap%' : 'Rel Vol'}</div>
-      <div class="mov-table__num">Volume</div>
-      <div class="mov-table__num">Mkt Cap</div>
+      <div class="most-table__num">Price</div>
+      <div class="most-table__num">${isPremarket ? 'PM Chg%' : 'Change%'}</div>
+      <div class="most-table__num">${isPremarket ? 'PM Gap%' : 'Rel Vol'}</div>
+      <div class="most-table__num">Volume</div>
+      <div class="most-table__num">Mkt Cap</div>
       <div>Sector</div>
     </div>`;
 
-  rows.forEach((e) => {
+  rows.forEach((e, i) => {
     const chg = isPremarket ? e.premarket_change : e.change;
-    const chgClass = chg != null ? (chg >= 0 ? 'mov-table__positive' : 'mov-table__negative') : '';
+    const chgClass = chg != null ? (chg >= 0 ? 'most-table__positive' : 'most-table__negative') : '';
     const col3 = isPremarket ? e.premarket_gap : e.rel_volume;
 
-    const clickAction = movState.country === 'US'
+    const clickAction = mostState.country === 'US'
       ? `loadSymbol('NASDAQ:${escHtml(e.ticker)}', true)`
       : `searchAndLoad('${escHtml(e.ticker)}')`;
 
     html += `
-      <div class="mov-table__row" onclick="${clickAction}">
-        <div class="mov-table__ticker">${escHtml(e.ticker)}</div>
-        <div class="mov-table__name">${escHtml(e.name || '')}</div>
-        <div class="mov-table__num">${e.close != null ? e.close.toFixed(2) : '—'}</div>
-        <div class="mov-table__num ${chgClass}">${chg != null ? (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%' : '—'}</div>
-        <div class="mov-table__num">${col3 != null ? (isPremarket ? col3.toFixed(2) + '%' : col3.toFixed(1) + 'x') : '—'}</div>
-        <div class="mov-table__num">${e.volume != null ? fmtBigNum(e.volume) : '—'}</div>
-        <div class="mov-table__num">${e._market_cap != null ? fmtBigNum(e._market_cap) : '—'}</div>
-        <div class="mov-table__sector">${escHtml(e.sector || '')}</div>
+      <div class="most-table__row" onclick="${clickAction}">
+        <div class="most-table__rank">${i + 1}</div>
+        <div class="most-table__ticker">${escHtml(e.ticker)}</div>
+        <div class="most-table__name">${escHtml(e.name || '')}</div>
+        <div class="most-table__num">${e.close != null ? e.close.toFixed(2) : '—'}</div>
+        <div class="most-table__num ${chgClass}">${chg != null ? (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%' : '—'}</div>
+        <div class="most-table__num">${col3 != null ? (isPremarket ? col3.toFixed(2) + '%' : col3.toFixed(1) + 'x') : '—'}</div>
+        <div class="most-table__num">${e.volume != null ? fmtBigNum(e.volume) : '—'}</div>
+        <div class="most-table__num">${e._market_cap != null ? fmtBigNum(e._market_cap) : '—'}</div>
+        <div class="most-table__sector">${escHtml(e.sector || '')}</div>
+      </div>
+    `;
+  });
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+
+// ═══════════════════════════════════════
+// MOV — Index Movers
+// ═══════════════════════════════════════
+
+const movState = {
+  index: 'SPX',
+  sort: 'contribution',   // contribution | gainers | losers
+  filters: {},
+};
+
+const MOV_INDICES = [
+  { key: 'SPX',  label: 'S&P 500' },
+  { key: 'NDX',  label: 'NASDAQ 100' },
+  { key: 'DJI',  label: 'Dow Jones 30' },
+  { key: 'SX5E', label: 'Euro Stoxx 50' },
+  { key: 'DAX',  label: 'DAX 40' },
+  { key: 'FTSE', label: 'FTSE 100' },
+  { key: 'CAC',  label: 'CAC 40' },
+  { key: 'NKY',  label: 'Nikkei 225' },
+  { key: 'HSI',  label: 'Hang Seng' },
+];
+
+const MOV_FILTER_COLUMNS = [
+  { key: 'market_cap',    label: 'Market Cap',    placeholder: 'e.g. 1B' },
+  { key: 'change',        label: 'Change %',      placeholder: 'e.g. 2' },
+  { key: 'weight',        label: 'Weight %',      placeholder: 'e.g. 1' },
+  { key: 'contribution',  label: 'Contribution',  placeholder: 'e.g. 0.1' },
+];
+
+let _movData = null;
+
+function renderIndexMovers(container) {
+  container.className = 'dashboard dashboard--function';
+  container.innerHTML = `
+    <div class="function-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">MOV</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">Index Movers</div>
+            <div class="function-header__name-sub" id="mov-subtitle">Which stocks drive the index up or down</div>
+          </div>
+        </div>
+      </header>
+
+      <div class="function-toolbar">
+        <div class="function-toolbar__label">Index</div>
+        <select class="evts-country-select" id="mov-index-select" style="min-width:160px">
+          ${MOV_INDICES.map((idx) =>
+            `<option value="${idx.key}" ${idx.key === movState.index ? 'selected' : ''}>${escHtml(idx.label)}</option>`
+          ).join('')}
+        </select>
+
+        <div class="function-toolbar__label" style="margin-left:14px">Sort</div>
+        <div class="range-filter" id="mov-sort-filter">
+          <button class="country-btn country-btn--active" data-sort="contribution">Impact</button>
+          <button class="country-btn" data-sort="gainers">Top Gainers</button>
+          <button class="country-btn" data-sort="losers">Top Losers</button>
+        </div>
+      </div>
+
+      <div class="function-toolbar function-toolbar--filters">
+        <div class="function-toolbar__label">Filters</div>
+        <div class="filter-inputs" id="mov-filter-inputs"></div>
+      </div>
+
+      <div class="panel function-panel">
+        <div class="panel__body" id="mov-table-container">
+          <div class="evts-loading">
+            <div class="search-loading__spinner"></div>
+            <span>Loading index movers…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  renderColumnFilters('mov-filter-inputs', MOV_FILTER_COLUMNS, movState.filters, () => renderMovTable());
+
+  // Index dropdown
+  const indexSelect = $('#mov-index-select');
+  if (indexSelect) {
+    indexSelect.addEventListener('change', () => {
+      movState.index = indexSelect.value;
+      loadMovData();
+    });
+  }
+
+  // Sort tabs
+  $$('#mov-sort-filter .country-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('#mov-sort-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
+      btn.classList.add('country-btn--active');
+      movState.sort = btn.dataset.sort;
+      loadMovData();
+    });
+  });
+
+  loadMovData();
+}
+
+async function loadMovData() {
+  const container = $('#mov-table-container');
+  if (!container) return;
+  const idx = MOV_INDICES.find((i) => i.key === movState.index);
+  container.innerHTML = `
+    <div class="evts-loading">
+      <div class="search-loading__spinner"></div>
+      <span>Loading ${escHtml(idx ? idx.label : movState.index)} movers…</span>
+    </div>
+  `;
+
+  try {
+    const resp = await fetch(
+      `/api/index-movers?index=${movState.index}&sort=${movState.sort}`
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    if (payload.error) throw new Error(payload.error);
+    _movData = payload.rows || [];
+    setDataSource(payload.source || 'TradingView');
+    // Update subtitle
+    const sub = $('#mov-subtitle');
+    if (sub) sub.textContent = `${payload.label || movState.index} — ${_movData.length} constituents`;
+    renderMovTable();
+  } catch (err) {
+    console.error('Failed to load index movers:', err);
+    container.innerHTML = `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">⚠</div>
+        <div>Could not load index movers.</div>
+        <div class="text-muted" style="font-size:11px;margin-top:8px;">${escHtml(err.message)}</div>
+      </div>
+    `;
+  }
+}
+
+function renderMovTable() {
+  const container = $('#mov-table-container');
+  if (!container || !_movData) return;
+
+  let rows = applyColumnFilters(_movData, movState.filters);
+
+  if (rows.length === 0) {
+    container.innerHTML = `<div class="evts-empty"><div class="evts-empty__icon">📊</div><div>No results match the filters.</div></div>`;
+    return;
+  }
+
+  let html = `<div class="most-table">
+    <div class="most-table__header">
+      <div>#</div>
+      <div>Ticker</div>
+      <div>Company</div>
+      <div class="most-table__num">Price</div>
+      <div class="most-table__num">Change%</div>
+      <div class="most-table__num">Weight%</div>
+      <div class="most-table__num">Contribution</div>
+      <div class="most-table__num">Mkt Cap</div>
+      <div>Sector</div>
+    </div>`;
+
+  rows.forEach((e, i) => {
+    const chgClass = e.change != null ? (e.change >= 0 ? 'most-table__positive' : 'most-table__negative') : '';
+    const ctbClass = e.contribution != null ? (e.contribution >= 0 ? 'most-table__positive' : 'most-table__negative') : '';
+
+    html += `
+      <div class="most-table__row" onclick="searchAndLoad('${escHtml(e.ticker)}')">
+        <div class="most-table__rank">${i + 1}</div>
+        <div class="most-table__ticker">${escHtml(e.ticker)}</div>
+        <div class="most-table__name">${escHtml(e.name || '')}</div>
+        <div class="most-table__num">${e.close != null ? e.close.toFixed(2) : '—'}</div>
+        <div class="most-table__num ${chgClass}">${e.change != null ? (e.change >= 0 ? '+' : '') + e.change.toFixed(2) + '%' : '—'}</div>
+        <div class="most-table__num">${e.weight != null ? e.weight.toFixed(2) + '%' : '—'}</div>
+        <div class="most-table__num ${ctbClass}">${e.contribution != null ? (e.contribution >= 0 ? '+' : '') + e.contribution.toFixed(3) : '—'}</div>
+        <div class="most-table__num">${e.market_cap != null ? fmtBigNum(e.market_cap) : '—'}</div>
+        <div class="most-table__sector">${escHtml(e.sector || '')}</div>
       </div>
     `;
   });

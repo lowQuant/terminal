@@ -2650,23 +2650,23 @@ body {
 }
 
 /* ── MOV Table (8-column layout) ── */
-.mov-table {
+.most-table {
   overflow-y: auto;
   height: 100%;
   font-family: var(--font-mono);
   font-size: 12px;
 }
 
-.mov-table__header,
-.mov-table__row {
+.most-table__header,
+.most-table__row {
   display: grid;
-  grid-template-columns: 90px 1fr 80px 80px 80px 90px 90px 120px;
+  grid-template-columns: 36px 80px 1fr 70px 70px 70px 80px 80px 110px;
   gap: 10px;
   padding: 10px 16px;
   align-items: center;
 }
 
-.mov-table__header {
+.most-table__header {
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-primary);
   font-size: 10px;
@@ -2679,23 +2679,29 @@ body {
   z-index: 2;
 }
 
-.mov-table__row {
+.most-table__row {
   border-bottom: 1px solid var(--border-primary);
   cursor: pointer;
   transition: background 0.12s var(--ease);
 }
 
-.mov-table__row:hover {
+.most-table__row:hover {
   background: var(--bg-panel-hover);
 }
 
-.mov-table__ticker {
+.most-table__rank {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.most-table__ticker {
   color: var(--accent);
   font-weight: 700;
   font-size: 13px;
 }
 
-.mov-table__name {
+.most-table__name {
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 12px;
@@ -2704,16 +2710,16 @@ body {
   text-overflow: ellipsis;
 }
 
-.mov-table__num {
+.most-table__num {
   color: var(--text-primary);
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.mov-table__positive { color: var(--green); }
-.mov-table__negative { color: var(--red); }
+.most-table__positive { color: var(--green); }
+.most-table__negative { color: var(--red); }
 
-.mov-table__sector {
+.most-table__sector {
   color: var(--text-secondary);
   font-family: var(--font-sans);
   font-size: 11px;
@@ -2723,22 +2729,21 @@ body {
 }
 
 @media (max-width: 1100px) {
-  .mov-table__header,
-  .mov-table__row {
-    grid-template-columns: 80px 1fr 70px 70px 70px 80px;
+  .most-table__header,
+  .most-table__row {
+    grid-template-columns: 30px 70px 1fr 60px 60px 70px;
   }
-  /* Hide Volume and Sector on narrow screens */
-  .mov-table__header > *:nth-child(n+7),
-  .mov-table__row    > *:nth-child(n+7) { display: none; }
+  .most-table__header > *:nth-child(n+7),
+  .most-table__row    > *:nth-child(n+7) { display: none; }
 }
 
 @media (max-width: 800px) {
-  .mov-table__header,
-  .mov-table__row {
-    grid-template-columns: 70px 1fr 60px 60px;
+  .most-table__header,
+  .most-table__row {
+    grid-template-columns: 30px 60px 1fr 55px 55px;
   }
-  .mov-table__header > *:nth-child(n+5),
-  .mov-table__row    > *:nth-child(n+5) { display: none; }
+  .most-table__header > *:nth-child(n+6),
+  .most-table__row    > *:nth-child(n+6) { display: none; }
 }
 
 /* ── Column Filters (reusable min/max filter inputs) ── */
