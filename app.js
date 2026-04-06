@@ -194,6 +194,13 @@ const FUNCTIONS = [
     implemented: true,
   },
   {
+    code: 'EQS',
+    name: 'Equity Screener',
+    desc: 'Screen stocks by any fundamental, technical or price metric',
+    aliases: ['EQS', 'SCREEN', 'SCREENER', 'EQUITY'],
+    implemented: true,
+  },
+  {
     code: 'CMDTY',
     name: 'Commodity Overview',
     desc: 'Major commodities snapshot',
@@ -269,6 +276,7 @@ function openFunction(code) {
     case 'EVTS': renderEventsCalendar(dashboard); break;
     case 'MOST': renderMostActive(dashboard); break;
     case 'MOV':  renderIndexMovers(dashboard); break;
+    case 'EQS':  renderEquityScreener(dashboard); break;
   }
   updateStatusBar();
 }
@@ -2152,6 +2160,118 @@ function renderMovTable() {
   });
   html += `</div>`;
   container.innerHTML = html;
+}
+
+
+// ═══════════════════════════════════════
+// EQS — Equity Screener
+// ═══════════════════════════════════════
+//
+// Phase 1: TradingView's embed-widget-screener (quick to ship, built-in
+// column views + basic filtering). If too limited, Phase 2 replaces the
+// widget body with a custom scanner-API-driven table where the user
+// picks from all 3000+ fields.
+
+const eqsState = {
+  market: 'america',
+};
+
+function renderEquityScreener(container) {
+  container.className = 'dashboard dashboard--function';
+  container.innerHTML = `
+    <div class="function-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">EQS</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">Equity Screener</div>
+            <div class="function-header__name-sub">Screen stocks by fundamentals, technicals & price metrics</div>
+          </div>
+        </div>
+      </header>
+
+      <div class="function-toolbar">
+        <div class="function-toolbar__label">Market</div>
+        <select class="evts-country-select" id="eqs-market-select" style="min-width:180px">
+          <option value="america">🇺🇸 United States</option>
+        </select>
+      </div>
+
+      <div class="panel function-panel">
+        <div class="panel__body" id="eqs-widget-container"></div>
+      </div>
+    </div>
+  `;
+
+  // Populate market dropdown from country registry
+  const select = $('#eqs-market-select');
+  getScannerCountries().then((countries) => {
+    if (!select) return;
+    const regions = { americas: 'Americas', europe: 'Europe', asia_pacific: 'Asia Pacific', middle_east_africa: 'Middle East & Africa' };
+    const grouped = {};
+    // Only include countries that have a tv_scanner slug (skip EU aggregate)
+    countries.filter((c) => c.code !== 'EU').forEach((c) => {
+      (grouped[c.region] = grouped[c.region] || []).push(c);
+    });
+    let html = '';
+    for (const [key, label] of Object.entries(regions)) {
+      if (!grouped[key]) continue;
+      html += `<optgroup label="${escHtml(label)}">`;
+      grouped[key].forEach((c) => {
+        // We need the tv_scanner slug as value; fetch it from /api/countries/scanner
+        // The response includes code, name, flag, region but not tv_scanner.
+        // Map code → scanner slug via a known mapping.
+        const slug = _countryCodeToScanner(c.code);
+        if (!slug) return;
+        html += `<option value="${escHtml(slug)}" ${slug === eqsState.market ? 'selected' : ''}>${c.flag} ${escHtml(c.name)}</option>`;
+      });
+      html += `</optgroup>`;
+    }
+    select.innerHTML = html;
+  });
+
+  select?.addEventListener('change', () => {
+    eqsState.market = select.value;
+    injectEqsWidget();
+  });
+
+  setDataSource('TradingView');
+  injectEqsWidget();
+}
+
+// Map country code → TradingView scanner slug. The /api/countries/scanner
+// response doesn't include the slug directly, so we maintain a light map.
+// If we need more, we can expose tv_scanner in the countries API.
+function _countryCodeToScanner(code) {
+  const map = {
+    US: 'america', CA: 'canada', MX: 'mexico', BR: 'brazil',
+    GB: 'uk', DE: 'germany', FR: 'france', NL: 'netherlands',
+    IT: 'italy', ES: 'spain', CH: 'switzerland', BE: 'belgium',
+    AT: 'austria', PT: 'portugal', IE: 'ireland', DK: 'denmark',
+    SE: 'sweden', FI: 'finland', NO: 'norway', PL: 'poland', GR: 'greece',
+    JP: 'japan', CN: 'china', HK: 'hongkong', KR: 'korea', TW: 'taiwan',
+    IN: 'india', AU: 'australia', NZ: 'new-zealand', SG: 'singapore',
+    ID: 'indonesia', TH: 'thailand',
+    IL: 'israel', SA: 'saudi-arabia', ZA: 'south-africa', TR: 'turkey',
+  };
+  return map[code] || null;
+}
+
+function injectEqsWidget() {
+  injectWidget('eqs-widget-container',
+    'https://s3.tradingview.com/external-embedding/embed-widget-screener.js',
+    {
+      width: '100%',
+      height: '100%',
+      defaultColumn: 'overview',
+      defaultScreen: 'most_capitalized',
+      market: eqsState.market,
+      showToolbar: true,
+      colorTheme: 'dark',
+      locale: 'en',
+      isTransparent: true,
+    }
+  );
 }
 
 
