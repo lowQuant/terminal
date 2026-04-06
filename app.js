@@ -1441,20 +1441,46 @@ function renderEvtsTable() {
   const container = $('#evts-table-container');
   if (!container || !_evtsData) return;
 
-  // Apply scope filter, then column filters
+  // 1. Scope filter
   let rows = _evtsData;
   if (evtsState.scope === 'watchlist') {
     const wlSet = new Set(state.watchlist.map((w) => w.symbol.toUpperCase()));
     rows = rows.filter((e) => wlSet.has((e.ticker || '').toUpperCase()));
   }
-  rows = applyColumnFilters(rows, evtsState.filters);
 
-  // Currency conversion — if a display currency is chosen, we convert
-  // each row's values from its local currency to the target. For single-
-  // country views the local currency is uniform; for EU aggregate, each
-  // row may have a different local currency based on its 'country' field.
+  // 2. Currency conversion — build display-ready rows with converted
+  //    numeric values BEFORE applying column filters, so min/max
+  //    thresholds match what the user actually sees on screen.
   const toCcy = evtsState.displayCurrency;
-  const ccyLabel = toCcy || evtsState.localCurrency;
+  rows = rows.map((e) => {
+    let fx = 1;
+    if (toCcy && evtsState.fxRates) {
+      const rc = (_scannerCountries || []).find((c) => c.name === e.country);
+      const fromCcy = (rc && rc.currency) || evtsState.localCurrency;
+      if (fromCcy !== toCcy) {
+        fx = _fxConvertRate(fromCcy, toCcy, evtsState.fxRates);
+      }
+    }
+    return {
+      ...e,
+      _eps_estimate:  e.eps_estimate != null ? e.eps_estimate * fx : null,
+      _last_year_eps: e.last_year_eps != null ? e.last_year_eps * fx : null,
+      _market_cap:    e.market_cap != null ? e.market_cap * fx : null,
+    };
+  });
+
+  // 3. Column filters — operate on the converted (_) values
+  rows = rows.filter((row) => {
+    for (const [key, bounds] of Object.entries(evtsState.filters)) {
+      // Map filter keys to the converted fields
+      const displayKey = '_' + key;
+      const val = row[displayKey] != null ? row[displayKey] : row[key];
+      if (val == null) continue;
+      if (bounds.min != null && val < bounds.min) return false;
+      if (bounds.max != null && val > bounds.max) return false;
+    }
+    return true;
+  });
 
   if (rows.length === 0) {
     const countries = _scannerCountries || [];
@@ -1486,9 +1512,9 @@ function renderEvtsTable() {
         <div>Time</div>
         <div>Ticker</div>
         <div>Company</div>
-        <div class="evts-table__num">EPS Est. (${escHtml(ccyLabel)})</div>
-        <div class="evts-table__num">Last Yr (${escHtml(ccyLabel)})</div>
-        <div class="evts-table__num">Mkt Cap (${escHtml(ccyLabel)})</div>
+        <div class="evts-table__num">EPS Est.</div>
+        <div class="evts-table__num">Last Yr</div>
+        <div class="evts-table__num">Mkt Cap</div>
       </div>
   `;
 
@@ -1501,17 +1527,6 @@ function renderEvtsTable() {
       // NASDAQ prefix. Non-US rows come from the TV scanner with a
       // Yahoo ticker (e.g. "ASML.AS") — searchAndLoad resolves it via
       // /api/search which returns the correct yfExchange internal key.
-      // Per-row FX conversion: derive local currency from the row's
-      // country name via _scannerCountries, then convert if needed.
-      let rowFx = 1;
-      if (toCcy && evtsState.fxRates) {
-        const rowCountry = (_scannerCountries || []).find((c) => c.name === e.country);
-        const rowCcy = (rowCountry && rowCountry.currency) || evtsState.localCurrency;
-        if (rowCcy !== toCcy) {
-          rowFx = _fxConvertRate(rowCcy, toCcy, evtsState.fxRates);
-        }
-      }
-
       const clickAction = evtsState.country === 'US'
         ? `loadSymbol('NASDAQ:${escHtml(e.ticker)}', true)`
         : `searchAndLoad('${escHtml(e.ticker)}')`;
@@ -1521,9 +1536,9 @@ function renderEvtsTable() {
           <div class="evts-table__time">${escHtml(fmtEvtsTime(e.time))}</div>
           <div class="evts-table__ticker">${escHtml(e.ticker)}</div>
           <div class="evts-table__name">${escHtml(e.name || '')}</div>
-          <div class="evts-table__num">${e.eps_estimate != null ? (e.eps_estimate * rowFx).toFixed(2) : '—'}</div>
-          <div class="evts-table__num">${e.last_year_eps != null ? (e.last_year_eps * rowFx).toFixed(2) : '—'}</div>
-          <div class="evts-table__num">${e.market_cap != null ? fmtBigNum(e.market_cap * rowFx) : '—'}</div>
+          <div class="evts-table__num">${e._eps_estimate != null ? e._eps_estimate.toFixed(2) : '—'}</div>
+          <div class="evts-table__num">${e._last_year_eps != null ? e._last_year_eps.toFixed(2) : '—'}</div>
+          <div class="evts-table__num">${e._market_cap != null ? fmtBigNum(e._market_cap) : '—'}</div>
         </div>
       `;
     });
