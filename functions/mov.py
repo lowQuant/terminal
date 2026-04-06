@@ -59,26 +59,42 @@ INDICES = {
     'HSI':   {'market': 'hongkong','label': 'Hang Seng',        'top_n': 80},
 }
 
-COLUMNS = [
-    'name',                        # 0
-    'description',                 # 1
-    'close',                       # 2
-    'change',                      # 3  (% change today)
-    'change_abs',                  # 4  (absolute price change)
-    'volume',                      # 5
-    'market_cap_basic',            # 6
-    'sector',                      # 7
-    'country',                     # 8
-]
+# Scanner column for each time period
+PERIOD_COLUMNS = {
+    '1D':  'change',
+    '1W':  'Perf.W',
+    '1M':  'Perf.1M',
+    '3M':  'Perf.3M',
+    '6M':  'Perf.6M',
+    'YTD': 'Perf.YTD',
+    '1Y':  'Perf.Y',
+}
 
 
-def _fetch_index_movers(index_key: str) -> List[Dict]:
+def _build_columns(period: str) -> List[str]:
+    perf_col = PERIOD_COLUMNS.get(period, 'change')
+    return [
+        'name',                        # 0
+        'description',                 # 1
+        'close',                       # 2
+        perf_col,                      # 3  (% change for selected period)
+        'change_abs',                  # 4  (absolute price change — 1D)
+        'volume',                      # 5
+        'market_cap_basic',            # 6
+        'sector',                      # 7
+        'country',                     # 8
+    ]
+
+
+def _fetch_index_movers(index_key: str, period: str = '1D') -> List[Dict]:
     cfg = INDICES.get(index_key)
     if not cfg:
         return []
 
     markets = cfg.get('markets', [cfg['market']])
     top_n = cfg.get('top_n', 100)
+
+    columns = _build_columns(period)
 
     def _fetch_market(slug):
         body = {
@@ -89,7 +105,7 @@ def _fetch_index_movers(index_key: str) -> List[Dict]:
                 {'left': 'is_primary', 'operation': 'equal',    'right': True},
                 {'left': 'market_cap_basic', 'operation': 'greater', 'right': 50_000_000},
             ],
-            'columns': COLUMNS,
+            'columns': columns,
             'sort':    {'sortBy': 'market_cap_basic', 'sortOrder': 'desc'},
             'range':   [0, top_n if len(markets) == 1 else top_n // len(markets) + 20],
         }
@@ -170,16 +186,19 @@ def index_movers():
     """
     index_key = (request.args.get('index') or 'SPX').upper()
     sort_mode = (request.args.get('sort') or 'contribution').lower()
+    period = (request.args.get('period') or '1D').upper()
+    if period not in PERIOD_COLUMNS:
+        period = '1D'
 
     if index_key not in INDICES:
         return jsonify({'error': f'Unknown index: {index_key}',
                         'available': list(INDICES.keys())}), 400
 
     def fetch():
-        return _fetch_index_movers(index_key)
+        return _fetch_index_movers(index_key, period=period)
 
     try:
-        data = cached(f'index_movers_{index_key}', fetch, ttl=120)  # 2-min cache
+        data = cached(f'index_movers_{index_key}_{period}', fetch, ttl=120)
 
         # Apply sort
         if sort_mode == 'gainers':

@@ -69,7 +69,8 @@ VIEW_CONFIG = {
 MIN_MCAP = 50_000_000  # $50M floor to filter penny stocks
 
 
-def _fetch_movers(market_slug: str, view: str, limit: int = 100) -> List[Dict]:
+def _fetch_movers(market_slug: str, view: str, limit: int = 100,
+                  min_mcap: int = MIN_MCAP) -> List[Dict]:
     cfg = VIEW_CONFIG.get(view, VIEW_CONFIG['gainers'])
     columns = PREMARKET_COLUMNS if cfg['premarket'] else BASE_COLUMNS
 
@@ -78,7 +79,7 @@ def _fetch_movers(market_slug: str, view: str, limit: int = 100) -> List[Dict]:
         {'left': 'subtype',    'operation': 'in_range',
             'right': ['common', 'foreign-issuer']},
         {'left': 'is_primary', 'operation': 'equal',    'right': True},
-        {'left': 'market_cap_basic', 'operation': 'greater', 'right': MIN_MCAP},
+        {'left': 'market_cap_basic', 'operation': 'greater', 'right': min_mcap},
     ]
     # For losers, only show negative change
     if view == 'losers':
@@ -144,7 +145,8 @@ def _fetch_movers(market_slug: str, view: str, limit: int = 100) -> List[Dict]:
     return out
 
 
-def _fetch_region_movers(country_code: str, view: str, limit: int) -> List[Dict]:
+def _fetch_region_movers(country_code: str, view: str, limit: int,
+                         min_mcap: int = MIN_MCAP) -> List[Dict]:
     """Fetch movers for a region (may span multiple scanner slugs)."""
     from concurrent.futures import ThreadPoolExecutor
 
@@ -154,7 +156,7 @@ def _fetch_region_movers(country_code: str, view: str, limit: int) -> List[Dict]
 
     def _safe(slug):
         try:
-            return _fetch_movers(slug, view, limit=limit)
+            return _fetch_movers(slug, view, limit=limit, min_mcap=min_mcap)
         except Exception as e:
             print(f'[most] {slug}/{view} failed: {e}')
             return []
@@ -189,6 +191,14 @@ def movers():
         limit = 50
     limit = max(1, min(limit, 200))
 
+    # Server-side market cap filter — lets the scanner pre-filter so
+    # that large-cap-only queries don't miss results.
+    try:
+        min_mcap = int(float(request.args.get('min_mcap', MIN_MCAP)))
+    except (ValueError, TypeError):
+        min_mcap = MIN_MCAP
+    min_mcap = max(MIN_MCAP, min_mcap)  # never go below the floor
+
     if view not in VIEW_CONFIG:
         return jsonify({'error': f'Unknown view: {view}'}), 400
 
@@ -200,10 +210,10 @@ def movers():
         })
 
     def fetch():
-        return _fetch_region_movers(country, view, limit)
+        return _fetch_region_movers(country, view, limit, min_mcap=min_mcap)
 
     try:
-        data = cached(f'movers_{country}_{view}_{limit}', fetch, ttl=120)  # 2-min cache
+        data = cached(f'movers_{country}_{view}_{limit}_{min_mcap}', fetch, ttl=120)
         return jsonify({
             'rows':    data,
             'source':  'TradingView',

@@ -1111,6 +1111,16 @@ function injectEcoWidget() {
 // onChange is called after any filter value changes so the table can
 // re-render with the new filters applied.
 
+// Toggle filter visibility for a function view
+function toggleFilters(barId, btnId) {
+  const bar = document.getElementById(barId);
+  const btn = document.getElementById(btnId);
+  if (!bar) return;
+  const show = bar.hidden;
+  bar.hidden = !show;
+  if (btn) btn.classList.toggle('filter-toggle--active', show);
+}
+
 function renderColumnFilters(containerId, columns, filterState, onChange) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -1133,15 +1143,15 @@ function renderColumnFilters(containerId, columns, filterState, onChange) {
     `;
   }).join('');
 
-  // Wire input events (debounced)
-  const debouncedApply = debounce(() => onChange(), 400);
+  // Wire input events (debounced). onChange receives the changed key
+  // so callers can decide whether to refetch or just re-render.
   container.querySelectorAll('.filter-group__input').forEach((input) => {
+    const debouncedApply = debounce(() => onChange(input.dataset.filterKey), 400);
     input.addEventListener('input', () => {
       const key = input.dataset.filterKey;
       const bound = input.dataset.filterBound;
       if (!filterState[key]) filterState[key] = {};
-      const parsed = parseFilterValue(input.value.trim());
-      filterState[key][bound] = parsed;
+      filterState[key][bound] = parseFilterValue(input.value.trim());
       debouncedApply();
     });
   });
@@ -1286,11 +1296,14 @@ function renderEventsCalendar(container) {
         </select>
 
         <div class="function-toolbar__actions">
+          <button class="filter-toggle" id="evts-filter-toggle" onclick="toggleFilters('evts-filters-bar','evts-filter-toggle')">
+            <span class="filter-toggle__icon">&#9707;</span> Filters
+          </button>
           <button class="country-btn country-btn--ghost" onclick="reloadEvtsCalendar()">Refresh</button>
         </div>
       </div>
 
-      <div class="function-toolbar function-toolbar--filters" id="evts-filters-bar">
+      <div class="function-toolbar function-toolbar--filters" id="evts-filters-bar" hidden>
         <div class="function-toolbar__label">Filters</div>
         <div class="filter-inputs" id="evts-filter-inputs"></div>
       </div>
@@ -1676,9 +1689,12 @@ function renderMostActive(container) {
           <option value="JPY">JPY</option>
           <option value="CHF">CHF</option>
         </select>
+        <button class="filter-toggle" id="most-filter-toggle" onclick="toggleFilters('most-filters-bar','most-filter-toggle')">
+          <span class="filter-toggle__icon">&#9707;</span> Filters
+        </button>
       </div>
 
-      <div class="function-toolbar function-toolbar--filters" id="most-filters-bar">
+      <div class="function-toolbar function-toolbar--filters" id="most-filters-bar" hidden>
         <div class="function-toolbar__label">Filters</div>
         <div class="filter-inputs" id="most-filter-inputs"></div>
       </div>
@@ -1695,7 +1711,15 @@ function renderMostActive(container) {
   `;
 
   // Filters
-  renderColumnFilters('most-filter-inputs', MOST_FILTER_COLUMNS, mostState.filters, () => renderMostTable());
+  // Market cap filter triggers a server-side refetch (scanner pre-filters);
+  // other filters are client-side only.
+  renderColumnFilters('most-filter-inputs', MOST_FILTER_COLUMNS, mostState.filters, (changedKey) => {
+    if (changedKey === 'market_cap') {
+      loadMostData();  // refetch with new min_mcap
+    } else {
+      renderMostTable();
+    }
+  });
 
   // View tabs
   $$('#most-view-filter .country-btn').forEach((btn) => {
@@ -1771,8 +1795,11 @@ async function loadMostData() {
   `;
 
   try {
+    // Pass server-side market cap filter if the user set one
+    const mcapMin = mostState.filters.market_cap?.min;
+    const mcapParam = mcapMin ? `&min_mcap=${Math.round(mcapMin)}` : '';
     const resp = await fetch(
-      `/api/movers?country=${mostState.country}&view=${mostState.view}&limit=${mostState.limit}`
+      `/api/movers?country=${mostState.country}&view=${mostState.view}&limit=${mostState.limit}${mcapParam}`
     );
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const payload = await resp.json();
@@ -1875,7 +1902,21 @@ function renderMostTable() {
 const movState = {
   index: 'SPX',
   sort: 'contribution',   // contribution | gainers | losers
+  period: '1D',            // 1D | 1W | 1M | 3M | 6M | YTD | 1Y
   filters: {},
+  displayCurrency: '',
+  fxRates: null,
+};
+
+// TradingView scanner column names for each performance period
+const MOV_PERIOD_COLUMNS = {
+  '1D':  'change',
+  '1W':  'Perf.W',
+  '1M':  'Perf.1M',
+  '3M':  'Perf.3M',
+  '6M':  'Perf.6M',
+  'YTD': 'Perf.YTD',
+  '1Y':  'Perf.Y',
 };
 
 const MOV_INDICES = [
@@ -1921,15 +1962,35 @@ function renderIndexMovers(container) {
           ).join('')}
         </select>
 
+        <div class="function-toolbar__label" style="margin-left:14px">Period</div>
+        <div class="range-filter" id="mov-period-filter">
+          ${Object.keys(MOV_PERIOD_COLUMNS).map((p) =>
+            `<button class="country-btn ${p === movState.period ? 'country-btn--active' : ''}" data-period="${p}">${p}</button>`
+          ).join('')}
+        </div>
+
         <div class="function-toolbar__label" style="margin-left:14px">Sort</div>
         <div class="range-filter" id="mov-sort-filter">
           <button class="country-btn country-btn--active" data-sort="contribution">Impact</button>
-          <button class="country-btn" data-sort="gainers">Top Gainers</button>
-          <button class="country-btn" data-sort="losers">Top Losers</button>
+          <button class="country-btn" data-sort="gainers">Gainers</button>
+          <button class="country-btn" data-sort="losers">Losers</button>
         </div>
+
+        <div class="function-toolbar__label" style="margin-left:14px">Ccy</div>
+        <select class="evts-country-select" id="mov-currency-select" style="min-width:80px">
+          <option value="">Local</option>
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+          <option value="GBP">GBP</option>
+          <option value="JPY">JPY</option>
+        </select>
+
+        <button class="filter-toggle" id="mov-filter-toggle" onclick="toggleFilters('mov-filters-bar','mov-filter-toggle')">
+          <span class="filter-toggle__icon">&#9707;</span> Filters
+        </button>
       </div>
 
-      <div class="function-toolbar function-toolbar--filters">
+      <div class="function-toolbar function-toolbar--filters" id="mov-filters-bar" hidden>
         <div class="function-toolbar__label">Filters</div>
         <div class="filter-inputs" id="mov-filter-inputs"></div>
       </div>
@@ -1948,13 +2009,20 @@ function renderIndexMovers(container) {
   renderColumnFilters('mov-filter-inputs', MOV_FILTER_COLUMNS, movState.filters, () => renderMovTable());
 
   // Index dropdown
-  const indexSelect = $('#mov-index-select');
-  if (indexSelect) {
-    indexSelect.addEventListener('change', () => {
-      movState.index = indexSelect.value;
+  $('#mov-index-select')?.addEventListener('change', (e) => {
+    movState.index = e.target.value;
+    loadMovData();
+  });
+
+  // Period tabs
+  $$('#mov-period-filter .country-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('#mov-period-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
+      btn.classList.add('country-btn--active');
+      movState.period = btn.dataset.period;
       loadMovData();
     });
-  }
+  });
 
   // Sort tabs
   $$('#mov-sort-filter .country-btn').forEach((btn) => {
@@ -1964,6 +2032,18 @@ function renderIndexMovers(container) {
       movState.sort = btn.dataset.sort;
       loadMovData();
     });
+  });
+
+  // Currency dropdown
+  $('#mov-currency-select')?.addEventListener('change', async (e) => {
+    movState.displayCurrency = e.target.value;
+    if (movState.displayCurrency && !movState.fxRates) {
+      try {
+        const resp = await fetch('/api/fx/rates');
+        if (resp.ok) movState.fxRates = (await resp.json()).rates || {};
+      } catch (err) { console.warn('FX fetch failed:', err); }
+    }
+    renderMovTable();
   });
 
   loadMovData();
@@ -1982,7 +2062,7 @@ async function loadMovData() {
 
   try {
     const resp = await fetch(
-      `/api/index-movers?index=${movState.index}&sort=${movState.sort}`
+      `/api/index-movers?index=${movState.index}&sort=${movState.sort}&period=${movState.period}`
     );
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const payload = await resp.json();
@@ -2009,12 +2089,35 @@ function renderMovTable() {
   const container = $('#mov-table-container');
   if (!container || !_movData) return;
 
-  let rows = applyColumnFilters(_movData, movState.filters);
+  // FX conversion
+  const toCcy = movState.displayCurrency;
+  let rows = _movData.map((e) => {
+    let fx = 1;
+    if (toCcy && movState.fxRates) {
+      const rc = (_scannerCountries || []).find((c) => c.name === e.country);
+      const fromCcy = (rc && rc.currency) || 'USD';
+      if (fromCcy !== toCcy) fx = _fxConvertRate(fromCcy, toCcy, movState.fxRates);
+    }
+    return { ...e, _market_cap: e.market_cap != null ? e.market_cap * fx : null };
+  });
+
+  // Apply filters on converted values
+  rows = rows.filter((row) => {
+    for (const [key, bounds] of Object.entries(movState.filters)) {
+      const val = key === 'market_cap' ? row._market_cap : row[key];
+      if (val == null) continue;
+      if (bounds.min != null && val < bounds.min) return false;
+      if (bounds.max != null && val > bounds.max) return false;
+    }
+    return true;
+  });
 
   if (rows.length === 0) {
     container.innerHTML = `<div class="evts-empty"><div class="evts-empty__icon">📊</div><div>No results match the filters.</div></div>`;
     return;
   }
+
+  const periodLabel = movState.period === '1D' ? 'Change%' : movState.period + ' Perf%';
 
   let html = `<div class="most-table">
     <div class="most-table__header">
@@ -2022,7 +2125,7 @@ function renderMovTable() {
       <div>Ticker</div>
       <div>Company</div>
       <div class="most-table__num">Price</div>
-      <div class="most-table__num">Change%</div>
+      <div class="most-table__num">${escHtml(periodLabel)}</div>
       <div class="most-table__num">Weight%</div>
       <div class="most-table__num">Contribution</div>
       <div class="most-table__num">Mkt Cap</div>
@@ -2042,7 +2145,7 @@ function renderMovTable() {
         <div class="most-table__num ${chgClass}">${e.change != null ? (e.change >= 0 ? '+' : '') + e.change.toFixed(2) + '%' : '—'}</div>
         <div class="most-table__num">${e.weight != null ? e.weight.toFixed(2) + '%' : '—'}</div>
         <div class="most-table__num ${ctbClass}">${e.contribution != null ? (e.contribution >= 0 ? '+' : '') + e.contribution.toFixed(3) : '—'}</div>
-        <div class="most-table__num">${e.market_cap != null ? fmtBigNum(e.market_cap) : '—'}</div>
+        <div class="most-table__num">${e._market_cap != null ? fmtBigNum(e._market_cap) : '—'}</div>
         <div class="most-table__sector">${escHtml(e.sector || '')}</div>
       </div>
     `;

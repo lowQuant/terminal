@@ -2746,6 +2746,46 @@ body {
   .most-table__row    > *:nth-child(n+6) { display: none; }
 }
 
+/* ── Filter toggle button ── */
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.15s var(--ease);
+  text-transform: uppercase;
+  margin-left: auto;
+}
+
+.filter-toggle:hover {
+  background: var(--bg-panel-hover);
+  border-color: var(--border-accent);
+  color: var(--text-secondary);
+}
+
+.filter-toggle--active {
+  background: var(--accent-glow-strong);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.filter-toggle__icon {
+  font-size: 12px;
+}
+
+.function-toolbar--filters[hidden] {
+  display: none;
+}
+
 /* ── Column Filters (reusable min/max filter inputs) ── */
 .function-toolbar--filters {
   gap: 10px;
