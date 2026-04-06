@@ -2164,17 +2164,19 @@ function renderMovTable() {
 
 
 // ═══════════════════════════════════════
-// EQS — Equity Screener
+// EQS — Equity Screener (custom, scanner-API-driven)
 // ═══════════════════════════════════════
-//
-// Phase 1: TradingView's embed-widget-screener (quick to ship, built-in
-// column views + basic filtering). If too limited, Phase 2 replaces the
-// widget body with a custom scanner-API-driven table where the user
-// picks from all 3000+ fields.
 
 const eqsState = {
   market: 'america',
+  preset: 'overview',
+  filters: [],           // [{field, op, value}]
+  sort: { field: 'market_cap_basic', order: 'desc' },
+  limit: 100,
 };
+
+let _eqsFields = null;   // fetched from /api/eqs/fields
+let _eqsData = null;
 
 function renderEquityScreener(container) {
   container.className = 'dashboard dashboard--function';
@@ -2185,28 +2187,90 @@ function renderEquityScreener(container) {
           <div class="function-header__code">EQS</div>
           <div class="function-header__name">
             <div class="function-header__name-main">Equity Screener</div>
-            <div class="function-header__name-sub">Screen stocks by fundamentals, technicals & price metrics</div>
+            <div class="function-header__name-sub" id="eqs-subtitle">Screen stocks by fundamentals, technicals & price metrics</div>
           </div>
         </div>
       </header>
 
       <div class="function-toolbar">
         <div class="function-toolbar__label">Market</div>
-        <select class="evts-country-select" id="eqs-market-select" style="min-width:180px">
+        <select class="evts-country-select" id="eqs-market-select" style="min-width:160px">
           <option value="america">🇺🇸 United States</option>
         </select>
+
+        <div class="function-toolbar__label" style="margin-left:14px">View</div>
+        <div class="range-filter" id="eqs-preset-filter"></div>
+
+        <button class="filter-toggle" id="eqs-filter-toggle" onclick="toggleFilters('eqs-filters-bar','eqs-filter-toggle')">
+          <span class="filter-toggle__icon">&#9707;</span> Filters
+        </button>
+      </div>
+
+      <div class="function-toolbar function-toolbar--filters" id="eqs-filters-bar" hidden>
+        <div class="function-toolbar__label">Filters</div>
+        <div class="eqs-filter-builder" id="eqs-filter-builder">
+          <button class="country-btn country-btn--ghost" onclick="addEqsFilter()">+ Add Filter</button>
+        </div>
       </div>
 
       <div class="panel function-panel">
-        <div class="panel__body" id="eqs-widget-container"></div>
+        <div class="panel__body" id="eqs-table-container">
+          <div class="evts-loading">
+            <div class="search-loading__spinner"></div>
+            <span>Loading screener…</span>
+          </div>
+        </div>
       </div>
     </div>
   `;
 
-  // Populate market dropdown from the EQS markets endpoint (includes tv_scanner slug)
+  // Fetch fields + presets, then populate UI
+  _loadEqsFields().then(() => {
+    _ensureFieldMap();
+    _renderEqsPresets();
+    _populateEqsMarkets();
+    runEqsScan();
+  });
+
+  // Market change
+  $('#eqs-market-select')?.addEventListener('change', (e) => {
+    eqsState.market = e.target.value;
+    runEqsScan();
+  });
+
+  setDataSource('TradingView');
+}
+
+async function _loadEqsFields() {
+  if (_eqsFields) return;
+  try {
+    const resp = await fetch('/api/eqs/fields');
+    if (resp.ok) _eqsFields = await resp.json();
+  } catch (e) { console.warn('Failed to load EQS fields:', e); }
+  if (!_eqsFields) _eqsFields = { categories: [], fields: {}, presets: {} };
+}
+
+function _renderEqsPresets() {
+  const bar = $('#eqs-preset-filter');
+  if (!bar || !_eqsFields) return;
+  const presets = _eqsFields.presets || {};
+  bar.innerHTML = Object.entries(presets).map(([key, cfg]) =>
+    `<button class="country-btn ${key === eqsState.preset ? 'country-btn--active' : ''}" data-preset="${key}">${escHtml(cfg.label)}</button>`
+  ).join('');
+  $$('#eqs-preset-filter .country-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('#eqs-preset-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
+      btn.classList.add('country-btn--active');
+      eqsState.preset = btn.dataset.preset;
+      runEqsScan();
+    });
+  });
+}
+
+function _populateEqsMarkets() {
   const select = $('#eqs-market-select');
+  if (!select) return;
   fetch('/api/eqs/markets').then(r => r.ok ? r.json() : []).then((markets) => {
-    if (!select || !markets.length) return;
     const regions = { americas: 'Americas', europe: 'Europe', asia_pacific: 'Asia Pacific', middle_east_africa: 'Middle East & Africa' };
     const grouped = {};
     markets.forEach((m) => (grouped[m.region] = grouped[m.region] || []).push(m));
@@ -2221,68 +2285,216 @@ function renderEquityScreener(container) {
     }
     select.innerHTML = html;
   }).catch(() => {});
-
-  select?.addEventListener('change', () => {
-    eqsState.market = select.value;
-    injectEqsWidget();
-  });
-
-  // Intercept TV widget symbol clicks via postMessage. TradingView
-  // widgets send messages like {name: "tv-widget-symbol-click",
-  // data: {symbol: "NASDAQ:AAPL"}} when a symbol link is clicked.
-  // We catch these and route to our Overview instead of letting the
-  // iframe navigate to tradingview.com.
-  _installTvClickInterceptor();
-
-  setDataSource('TradingView');
-  injectEqsWidget();
 }
 
-// Installs a one-time global listener that intercepts TradingView widget
-// symbol clicks and loads the symbol in our terminal instead.
-let _tvInterceptorInstalled = false;
-function _installTvClickInterceptor() {
-  if (_tvInterceptorInstalled) return;
-  _tvInterceptorInstalled = true;
+// ── Filter builder ──
+function addEqsFilter() {
+  eqsState.filters.push({ field: 'market_cap_basic', op: 'greater', value: '' });
+  _renderEqsFilterRows();
+}
 
-  window.addEventListener('message', (event) => {
-    // TV widgets post JSON messages for various events
-    let msg;
-    try {
-      msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-    } catch { return; }
+function removeEqsFilter(idx) {
+  eqsState.filters.splice(idx, 1);
+  _renderEqsFilterRows();
+}
 
-    // Different widget versions use different message shapes
-    const symbol = msg?.symbolInfo?.name
-      || msg?.data?.symbol
-      || (msg?.name === 'tv-widget-symbol-click' && msg?.data);
+function _renderEqsFilterRows() {
+  const builder = $('#eqs-filter-builder');
+  if (!builder || !_eqsFields) return;
 
-    if (typeof symbol === 'string' && symbol.includes(':')) {
-      // Prevent the widget from navigating away
-      event.preventDefault?.();
-      event.stopPropagation?.();
+  const cats = _eqsFields.categories || [];
+  const fields = _eqsFields.fields || {};
 
-      // Load in our terminal
-      loadSymbol(symbol);
-    }
+  let html = '';
+  eqsState.filters.forEach((f, i) => {
+    // Build field <select> grouped by category
+    let fieldOpts = '';
+    cats.forEach((cat) => {
+      const items = fields[cat] || [];
+      if (!items.length) return;
+      fieldOpts += `<optgroup label="${escHtml(cat)}">`;
+      items.forEach((item) => {
+        fieldOpts += `<option value="${escHtml(item.key)}" ${item.key === f.field ? 'selected' : ''}>${escHtml(item.label)}</option>`;
+      });
+      fieldOpts += `</optgroup>`;
+    });
+
+    html += `
+      <div class="eqs-filter-row">
+        <select class="eqs-filter-field" data-idx="${i}">${fieldOpts}</select>
+        <select class="eqs-filter-op" data-idx="${i}">
+          <option value="greater" ${f.op === 'greater' ? 'selected' : ''}>&gt;</option>
+          <option value="egreater" ${f.op === 'egreater' ? 'selected' : ''}>≥</option>
+          <option value="less" ${f.op === 'less' ? 'selected' : ''}>&lt;</option>
+          <option value="eless" ${f.op === 'eless' ? 'selected' : ''}>≤</option>
+          <option value="equal" ${f.op === 'equal' ? 'selected' : ''}>=</option>
+        </select>
+        <input class="eqs-filter-value filter-group__input" type="text" data-idx="${i}"
+               placeholder="Value" value="${f.value !== '' && f.value != null ? f.value : ''}"
+               style="width:100px">
+        <button class="eqs-filter-remove" onclick="removeEqsFilter(${i})" title="Remove">✕</button>
+      </div>
+    `;
+  });
+  html += `<button class="country-btn country-btn--ghost" onclick="addEqsFilter()">+ Add Filter</button>`;
+  html += `<button class="country-btn country-btn--ghost" style="margin-left:8px" onclick="runEqsScan()">Apply</button>`;
+  builder.innerHTML = html;
+
+  // Wire filter change events
+  builder.querySelectorAll('.eqs-filter-field').forEach((el) => {
+    el.addEventListener('change', () => { eqsState.filters[+el.dataset.idx].field = el.value; });
+  });
+  builder.querySelectorAll('.eqs-filter-op').forEach((el) => {
+    el.addEventListener('change', () => { eqsState.filters[+el.dataset.idx].op = el.value; });
+  });
+  builder.querySelectorAll('.eqs-filter-value').forEach((el) => {
+    el.addEventListener('change', () => {
+      const raw = el.value.trim();
+      eqsState.filters[+el.dataset.idx].value = parseFilterValue(raw) ?? raw;
+    });
   });
 }
 
-function injectEqsWidget() {
-  injectWidget('eqs-widget-container',
-    'https://s3.tradingview.com/external-embedding/embed-widget-screener.js',
-    {
-      width: '100%',
-      height: '100%',
-      defaultColumn: 'overview',
-      defaultScreen: 'most_capitalized',
-      market: eqsState.market,
-      showToolbar: true,
-      colorTheme: 'dark',
-      locale: 'en',
-      isTransparent: true,
+// ── Scan ──
+async function runEqsScan() {
+  const container = $('#eqs-table-container');
+  if (!container) return;
+  container.innerHTML = `
+    <div class="evts-loading">
+      <div class="search-loading__spinner"></div>
+      <span>Scanning…</span>
+    </div>
+  `;
+
+  // Get columns from the active preset
+  const preset = (_eqsFields?.presets || {})[eqsState.preset];
+  const columns = preset ? preset.columns : ['close', 'change', 'volume', 'market_cap_basic'];
+
+  // Build server-side filters (only valid ones)
+  const apiFilters = eqsState.filters
+    .filter((f) => f.field && f.value !== '' && f.value != null)
+    .map((f) => ({ field: f.field, op: f.op, value: f.value }));
+
+  try {
+    const resp = await fetch('/api/eqs/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        market:  eqsState.market,
+        columns: columns,
+        filters: apiFilters,
+        sort:    eqsState.sort,
+        limit:   eqsState.limit,
+      }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    if (payload.error) throw new Error(payload.error);
+    _eqsData = payload;
+    renderEqsTable();
+    const sub = $('#eqs-subtitle');
+    if (sub) sub.textContent = `${payload.total} results`;
+  } catch (err) {
+    console.error('EQS scan failed:', err);
+    container.innerHTML = `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">⚠</div>
+        <div>Scan failed.</div>
+        <div class="text-muted" style="font-size:11px;margin-top:8px;">${escHtml(err.message)}</div>
+      </div>
+    `;
+  }
+}
+
+function renderEqsTable() {
+  const container = $('#eqs-table-container');
+  if (!container || !_eqsData) return;
+
+  const rows = _eqsData.rows || [];
+  const columns = (_eqsData.columns || []).slice(2); // skip name, description (shown as Ticker + Company)
+
+  if (rows.length === 0) {
+    container.innerHTML = `<div class="evts-empty"><div class="evts-empty__icon">📊</div><div>No stocks match the criteria.</div></div>`;
+    return;
+  }
+
+  // Build header
+  let html = `<div class="eqs-table"><div class="eqs-table__header">
+    <div class="eqs-table__th" data-sort="name">Ticker</div>
+    <div class="eqs-table__th">Company</div>`;
+  columns.forEach((col) => {
+    const fieldInfo = _FIELD_MAP_JS[col] || { label: col };
+    const isNum = !['text'].includes(fieldInfo.type || 'number');
+    html += `<div class="eqs-table__th ${isNum ? 'eqs-table__num' : ''}" data-sort="${escHtml(col)}">${escHtml(fieldInfo.label)}</div>`;
+  });
+  html += `</div>`;
+
+  // Build rows
+  rows.forEach((row) => {
+    html += `<div class="eqs-table__row" onclick="searchAndLoad('${escHtml(row.ticker)}')">
+      <div class="eqs-table__ticker">${escHtml(row.ticker)}</div>
+      <div class="eqs-table__name">${escHtml(row.name || '')}</div>`;
+    columns.forEach((col) => {
+      const val = row[col];
+      const fieldInfo = _FIELD_MAP_JS[col] || {};
+      html += `<div class="eqs-table__num">${_fmtEqsValue(val, fieldInfo.type)}</div>`;
+    });
+    html += `</div>`;
+  });
+  html += `</div>`;
+
+  container.innerHTML = html;
+
+  // Sortable headers
+  container.querySelectorAll('.eqs-table__th[data-sort]').forEach((th) => {
+    th.style.cursor = 'pointer';
+    th.addEventListener('click', () => {
+      const field = th.dataset.sort;
+      if (eqsState.sort.field === field) {
+        eqsState.sort.order = eqsState.sort.order === 'desc' ? 'asc' : 'desc';
+      } else {
+        eqsState.sort = { field, order: 'desc' };
+      }
+      runEqsScan();
+    });
+  });
+}
+
+// Client-side field label lookup (mirrors backend catalog)
+const _FIELD_MAP_JS = {};
+(function _initFieldMap() {
+  // Will be populated from the API on first load
+})();
+async function _ensureFieldMap() {
+  if (Object.keys(_FIELD_MAP_JS).length > 0) return;
+  await _loadEqsFields();
+  if (!_eqsFields) return;
+  for (const cat of Object.values(_eqsFields.fields || {})) {
+    for (const f of cat) {
+      _FIELD_MAP_JS[f.key] = f;
     }
-  );
+  }
+}
+
+function _fmtEqsValue(val, type) {
+  if (val == null || val === '') return '—';
+  if (type === 'percent') return (typeof val === 'number' ? val.toFixed(2) + '%' : String(val));
+  if (type === 'price') return (typeof val === 'number' ? val.toFixed(2) : String(val));
+  if (type === 'number') {
+    if (typeof val === 'number') {
+      const abs = Math.abs(val);
+      if (abs >= 1e12) return (val / 1e12).toFixed(2) + 'T';
+      if (abs >= 1e9) return (val / 1e9).toFixed(2) + 'B';
+      if (abs >= 1e6) return (val / 1e6).toFixed(1) + 'M';
+      if (abs >= 1e3) return (val / 1e3).toFixed(1) + 'K';
+      return val.toFixed(2);
+    }
+    return String(val);
+  }
+  if (type === 'date' && typeof val === 'number') {
+    return new Date(val * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  return String(val);
 }
 
 
