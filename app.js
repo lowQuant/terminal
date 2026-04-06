@@ -1190,6 +1190,9 @@ const evtsState = {
   scope: 'all',          // 'all' | 'watchlist'
   country: 'US',         // any code from _countries.py
   filters: {},           // { market_cap: {min, max}, eps_estimate: {min, max}, … }
+  displayCurrency: '',   // '' = local currency, or 'USD'/'EUR'/'GBP'/… for conversion
+  localCurrency: 'USD',  // set from backend response
+  fxRates: null,         // cached from /api/fx/rates
 };
 
 // Filterable numeric columns in EVTS. Each entry generates a min/max
@@ -1258,6 +1261,21 @@ function renderEventsCalendar(container) {
           <button class="country-btn country-btn--active" data-range="14">14d</button>
           <button class="country-btn" data-range="30">30d</button>
         </div>
+
+        <div class="function-toolbar__label" style="margin-left:14px">Currency</div>
+        <select class="evts-country-select" id="evts-currency-select" style="min-width:100px">
+          <option value="">Local</option>
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+          <option value="GBP">GBP</option>
+          <option value="JPY">JPY</option>
+          <option value="CHF">CHF</option>
+          <option value="CAD">CAD</option>
+          <option value="AUD">AUD</option>
+          <option value="HKD">HKD</option>
+          <option value="CNY">CNY</option>
+        </select>
+
         <div class="function-toolbar__actions">
           <button class="country-btn country-btn--ghost" onclick="reloadEvtsCalendar()">Refresh</button>
         </div>
@@ -1300,13 +1318,32 @@ function renderEventsCalendar(container) {
     });
   });
 
-  // Wire country dropdown change
+  // Wire country dropdown
   const countrySelect = $('#evts-country-select');
   if (countrySelect) {
     countrySelect.addEventListener('change', () => {
       evtsState.country = countrySelect.value;
       updateEvtsScopeLabel();
       loadEvtsCalendar();
+    });
+  }
+
+  // Wire currency dropdown
+  const currencySelect = $('#evts-currency-select');
+  if (currencySelect) {
+    currencySelect.addEventListener('change', async () => {
+      evtsState.displayCurrency = currencySelect.value;
+      // Fetch FX rates if needed and not cached
+      if (evtsState.displayCurrency && !evtsState.fxRates) {
+        try {
+          const resp = await fetch('/api/fx/rates');
+          if (resp.ok) {
+            const data = await resp.json();
+            evtsState.fxRates = data.rates || {};
+          }
+        } catch (e) { console.warn('FX rates fetch failed:', e); }
+      }
+      renderEvtsTable();
     });
   }
 
@@ -1382,8 +1419,9 @@ async function loadEvtsCalendar() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const payload = await resp.json();
     if (payload.error) throw new Error(payload.error);
-    // Backend returns {rows, source, country}
+    // Backend returns {rows, source, country, local_currency}
     _evtsData = payload.rows || [];
+    evtsState.localCurrency = payload.local_currency || 'USD';
     setDataSource(payload.source || 'EVTS');
     renderEvtsTable();
   } catch (err) {
@@ -1410,6 +1448,13 @@ function renderEvtsTable() {
     rows = rows.filter((e) => wlSet.has((e.ticker || '').toUpperCase()));
   }
   rows = applyColumnFilters(rows, evtsState.filters);
+
+  // Currency conversion — if a display currency is chosen, we convert
+  // each row's values from its local currency to the target. For single-
+  // country views the local currency is uniform; for EU aggregate, each
+  // row may have a different local currency based on its 'country' field.
+  const toCcy = evtsState.displayCurrency;
+  const ccyLabel = toCcy || evtsState.localCurrency;
 
   if (rows.length === 0) {
     const countries = _scannerCountries || [];
@@ -1441,9 +1486,9 @@ function renderEvtsTable() {
         <div>Time</div>
         <div>Ticker</div>
         <div>Company</div>
-        <div class="evts-table__num">EPS Est.</div>
-        <div class="evts-table__num">Last Yr</div>
-        <div class="evts-table__num">Mkt Cap</div>
+        <div class="evts-table__num">EPS Est. (${escHtml(ccyLabel)})</div>
+        <div class="evts-table__num">Last Yr (${escHtml(ccyLabel)})</div>
+        <div class="evts-table__num">Mkt Cap (${escHtml(ccyLabel)})</div>
       </div>
   `;
 
@@ -1456,6 +1501,17 @@ function renderEvtsTable() {
       // NASDAQ prefix. Non-US rows come from the TV scanner with a
       // Yahoo ticker (e.g. "ASML.AS") — searchAndLoad resolves it via
       // /api/search which returns the correct yfExchange internal key.
+      // Per-row FX conversion: derive local currency from the row's
+      // country name via _scannerCountries, then convert if needed.
+      let rowFx = 1;
+      if (toCcy && evtsState.fxRates) {
+        const rowCountry = (_scannerCountries || []).find((c) => c.name === e.country);
+        const rowCcy = (rowCountry && rowCountry.currency) || evtsState.localCurrency;
+        if (rowCcy !== toCcy) {
+          rowFx = _fxConvertRate(rowCcy, toCcy, evtsState.fxRates);
+        }
+      }
+
       const clickAction = evtsState.country === 'US'
         ? `loadSymbol('NASDAQ:${escHtml(e.ticker)}', true)`
         : `searchAndLoad('${escHtml(e.ticker)}')`;
@@ -1465,15 +1521,24 @@ function renderEvtsTable() {
           <div class="evts-table__time">${escHtml(fmtEvtsTime(e.time))}</div>
           <div class="evts-table__ticker">${escHtml(e.ticker)}</div>
           <div class="evts-table__name">${escHtml(e.name || '')}</div>
-          <div class="evts-table__num">${e.eps_estimate != null ? Number(e.eps_estimate).toFixed(2) : '—'}</div>
-          <div class="evts-table__num">${e.last_year_eps != null ? Number(e.last_year_eps).toFixed(2) : '—'}</div>
-          <div class="evts-table__num">${e.market_cap != null ? fmtBigNum(e.market_cap) : '—'}</div>
+          <div class="evts-table__num">${e.eps_estimate != null ? (e.eps_estimate * rowFx).toFixed(2) : '—'}</div>
+          <div class="evts-table__num">${e.last_year_eps != null ? (e.last_year_eps * rowFx).toFixed(2) : '—'}</div>
+          <div class="evts-table__num">${e.market_cap != null ? fmtBigNum(e.market_cap * rowFx) : '—'}</div>
         </div>
       `;
     });
   });
   html += `</div>`;
   container.innerHTML = html;
+}
+
+// Convert between currencies using the cached EUR-based rate table.
+function _fxConvertRate(from, to, rates) {
+  if (!from || !to || from === to) return 1;
+  const rateFrom = rates[from];
+  const rateTo = rates[to];
+  if (!rateFrom || !rateTo) return 1;
+  return rateTo / rateFrom;
 }
 
 function reloadEvtsCalendar() {

@@ -38,6 +38,7 @@ class Country:
     name:        str                          # 'United States', 'Germany', …
     flag:        str                          # '🇺🇸', '🇩🇪', …
     yf_suffix:   str                          # '', '.DE', '.T', …
+    currency:    str = 'USD'                  # ISO 4217: 'USD', 'EUR', 'JPY', …
     tv_scanner:  Optional[str] = None         # 'america', 'germany', …
     eco_code:    Optional[str] = None         # 'us', 'de', …
     region:      str = 'other'
@@ -48,50 +49,50 @@ class Country:
 # ═════════════════════════════════════════
 
 COUNTRIES: List[Country] = [
-    # ── Americas ──
-    Country('US',  'United States',  '🇺🇸', '',     'america',      'us', 'americas'),
-    Country('CA',  'Canada',         '🇨🇦', '.TO',  'canada',       'ca', 'americas'),
-    Country('MX',  'Mexico',         '🇲🇽', '.MX',  'mexico',       'mx', 'americas'),
-    Country('BR',  'Brazil',         '🇧🇷', '.SA',  'brazil',       'br', 'americas'),
+    # ── Americas ──                                     currency
+    Country('US',  'United States',  '🇺🇸', '',     'USD', 'america',      'us', 'americas'),
+    Country('CA',  'Canada',         '🇨🇦', '.TO',  'CAD', 'canada',       'ca', 'americas'),
+    Country('MX',  'Mexico',         '🇲🇽', '.MX',  'MXN', 'mexico',       'mx', 'americas'),
+    Country('BR',  'Brazil',         '🇧🇷', '.SA',  'BRL', 'brazil',       'br', 'americas'),
 
     # ── Europe ──
-    Country('EU',  'Eurozone',       '🇪🇺', '',     None,           'eu', 'europe'),   # aggregate, no single scanner slug
-    Country('GB',  'United Kingdom', '🇬🇧', '.L',   'uk',           'gb', 'europe'),
-    Country('DE',  'Germany',        '🇩🇪', '.DE',  'germany',      'de', 'europe'),
-    Country('FR',  'France',         '🇫🇷', '.PA',  'france',       'fr', 'europe'),
-    Country('NL',  'Netherlands',    '🇳🇱', '.AS',  'netherlands',  None,  'europe'),
-    Country('IT',  'Italy',          '🇮🇹', '.MI',  'italy',        'it', 'europe'),
-    Country('ES',  'Spain',          '🇪🇸', '.MC',  'spain',        'es', 'europe'),
-    Country('CH',  'Switzerland',    '🇨🇭', '.SW',  'switzerland',  'ch', 'europe'),
-    Country('BE',  'Belgium',        '🇧🇪', '.BR',  'belgium',      None,  'europe'),
-    Country('AT',  'Austria',        '🇦🇹', '.VI',  'austria',      None,  'europe'),
-    Country('PT',  'Portugal',       '🇵🇹', '.LS',  'portugal',     None,  'europe'),
-    Country('IE',  'Ireland',        '🇮🇪', '.IR',  'ireland',      None,  'europe'),
-    Country('DK',  'Denmark',        '🇩🇰', '.CO',  'denmark',      None,  'europe'),
-    Country('SE',  'Sweden',         '🇸🇪', '.ST',  'sweden',       None,  'europe'),
-    Country('FI',  'Finland',        '🇫🇮', '.HE',  'finland',      None,  'europe'),
-    Country('NO',  'Norway',         '🇳🇴', '.OL',  'norway',       None,  'europe'),
-    Country('PL',  'Poland',         '🇵🇱', '.WA',  'poland',       None,  'europe'),
-    Country('GR',  'Greece',         '🇬🇷', '.AT',  'greece',       None,  'europe'),
+    Country('EU',  'Eurozone',       '🇪🇺', '',     'EUR', None,           'eu', 'europe'),
+    Country('GB',  'United Kingdom', '🇬🇧', '.L',   'GBP', 'uk',           'gb', 'europe'),
+    Country('DE',  'Germany',        '🇩🇪', '.DE',  'EUR', 'germany',      'de', 'europe'),
+    Country('FR',  'France',         '🇫🇷', '.PA',  'EUR', 'france',       'fr', 'europe'),
+    Country('NL',  'Netherlands',    '🇳🇱', '.AS',  'EUR', 'netherlands',  None,  'europe'),
+    Country('IT',  'Italy',          '🇮🇹', '.MI',  'EUR', 'italy',        'it', 'europe'),
+    Country('ES',  'Spain',          '🇪🇸', '.MC',  'EUR', 'spain',        'es', 'europe'),
+    Country('CH',  'Switzerland',    '🇨🇭', '.SW',  'CHF', 'switzerland',  'ch', 'europe'),
+    Country('BE',  'Belgium',        '🇧🇪', '.BR',  'EUR', 'belgium',      None,  'europe'),
+    Country('AT',  'Austria',        '🇦🇹', '.VI',  'EUR', 'austria',      None,  'europe'),
+    Country('PT',  'Portugal',       '🇵🇹', '.LS',  'EUR', 'portugal',     None,  'europe'),
+    Country('IE',  'Ireland',        '🇮🇪', '.IR',  'EUR', 'ireland',      None,  'europe'),
+    Country('DK',  'Denmark',        '🇩🇰', '.CO',  'DKK', 'denmark',      None,  'europe'),
+    Country('SE',  'Sweden',         '🇸🇪', '.ST',  'SEK', 'sweden',       None,  'europe'),
+    Country('FI',  'Finland',        '🇫🇮', '.HE',  'EUR', 'finland',      None,  'europe'),
+    Country('NO',  'Norway',         '🇳🇴', '.OL',  'NOK', 'norway',       None,  'europe'),
+    Country('PL',  'Poland',         '🇵🇱', '.WA',  'PLN', 'poland',       None,  'europe'),
+    Country('GR',  'Greece',         '🇬🇷', '.AT',  'EUR', 'greece',       None,  'europe'),
 
     # ── Asia-Pacific ──
-    Country('JP',  'Japan',          '🇯🇵', '.T',   'japan',        'jp', 'asia_pacific'),
-    Country('CN',  'China',          '🇨🇳', '.SS',  'china',        'cn', 'asia_pacific'),
-    Country('HK',  'Hong Kong',      '🇭🇰', '.HK',  'hongkong',     None,  'asia_pacific'),
-    Country('KR',  'South Korea',    '🇰🇷', '.KS',  'korea',        'kr', 'asia_pacific'),
-    Country('TW',  'Taiwan',         '🇹🇼', '.TW',  'taiwan',       None,  'asia_pacific'),
-    Country('IN',  'India',          '🇮🇳', '.NS',  'india',        'in', 'asia_pacific'),
-    Country('AU',  'Australia',      '🇦🇺', '.AX',  'australia',    'au', 'asia_pacific'),
-    Country('NZ',  'New Zealand',    '🇳🇿', '.NZ',  'new-zealand',  'nz', 'asia_pacific'),
-    Country('SG',  'Singapore',      '🇸🇬', '.SI',  'singapore',    None,  'asia_pacific'),
-    Country('ID',  'Indonesia',      '🇮🇩', '.JK',  'indonesia',    None,  'asia_pacific'),
-    Country('TH',  'Thailand',       '🇹🇭', '.BK',  'thailand',     None,  'asia_pacific'),
+    Country('JP',  'Japan',          '🇯🇵', '.T',   'JPY', 'japan',        'jp', 'asia_pacific'),
+    Country('CN',  'China',          '🇨🇳', '.SS',  'CNY', 'china',        'cn', 'asia_pacific'),
+    Country('HK',  'Hong Kong',      '🇭🇰', '.HK',  'HKD', 'hongkong',     None,  'asia_pacific'),
+    Country('KR',  'South Korea',    '🇰🇷', '.KS',  'KRW', 'korea',        'kr', 'asia_pacific'),
+    Country('TW',  'Taiwan',         '🇹🇼', '.TW',  'TWD', 'taiwan',       None,  'asia_pacific'),
+    Country('IN',  'India',          '🇮🇳', '.NS',  'INR', 'india',        'in', 'asia_pacific'),
+    Country('AU',  'Australia',      '🇦🇺', '.AX',  'AUD', 'australia',    'au', 'asia_pacific'),
+    Country('NZ',  'New Zealand',    '🇳🇿', '.NZ',  'NZD', 'new-zealand',  'nz', 'asia_pacific'),
+    Country('SG',  'Singapore',      '🇸🇬', '.SI',  'SGD', 'singapore',    None,  'asia_pacific'),
+    Country('ID',  'Indonesia',      '🇮🇩', '.JK',  'IDR', 'indonesia',    None,  'asia_pacific'),
+    Country('TH',  'Thailand',       '🇹🇭', '.BK',  'THB', 'thailand',     None,  'asia_pacific'),
 
     # ── Middle East & Africa ──
-    Country('IL',  'Israel',         '🇮🇱', '.TA',  'israel',       None,  'middle_east_africa'),
-    Country('SA',  'Saudi Arabia',   '🇸🇦', '.SR',  'saudi-arabia', None,  'middle_east_africa'),
-    Country('ZA',  'South Africa',   '🇿🇦', '.JO',  'south-africa', 'za', 'middle_east_africa'),
-    Country('TR',  'Turkey',         '🇹🇷', '.IS',  'turkey',       'tr', 'middle_east_africa'),
+    Country('IL',  'Israel',         '🇮🇱', '.TA',  'ILS', 'israel',       None,  'middle_east_africa'),
+    Country('SA',  'Saudi Arabia',   '🇸🇦', '.SR',  'SAR', 'saudi-arabia', None,  'middle_east_africa'),
+    Country('ZA',  'South Africa',   '🇿🇦', '.JO',  'ZAR', 'south-africa', 'za', 'middle_east_africa'),
+    Country('TR',  'Turkey',         '🇹🇷', '.IS',  'TRY', 'turkey',       'tr', 'middle_east_africa'),
 ]
 
 
@@ -164,10 +165,17 @@ def region_scanner_slugs(region_code: str) -> List[str]:
     return []
 
 
+def currency_for_country(code: str) -> str:
+    """Return the ISO 4217 currency code for a country code."""
+    c = by_code(code)
+    return c.currency if c else 'USD'
+
+
 def to_json(countries: Optional[List[Country]] = None) -> List[dict]:
     """Serialize countries for the frontend API."""
     items = countries if countries is not None else COUNTRIES
     return [
-        {'code': c.code, 'name': c.name, 'flag': c.flag, 'region': c.region}
+        {'code': c.code, 'name': c.name, 'flag': c.flag,
+         'region': c.region, 'currency': c.currency}
         for c in items
     ]

@@ -27,7 +27,7 @@ from flask import Blueprint, jsonify, request
 
 from functions._utils import cached
 from functions._tv_scanner import fetch_earnings_calendar
-from functions._countries import region_scanner_slugs
+from functions._countries import region_scanner_slugs, currency_for_country
 
 
 evts_bp = Blueprint('evts', __name__)
@@ -162,9 +162,10 @@ def earnings_calendar():
     try:
         data = cached(f'earnings_{country}_{days}', fetch, ttl=1800)
         return jsonify({
-            'rows':    data,
-            'source':  'NASDAQ' if use_nasdaq else 'TradingView',
-            'country': country,
+            'rows':           data,
+            'source':         'NASDAQ' if use_nasdaq else 'TradingView',
+            'country':        country,
+            'local_currency': currency_for_country(country),
         })
     except Exception as e:
         traceback.print_exc()
