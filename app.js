@@ -52,7 +52,7 @@ const state = {
   // Worksheet-based watchlist
   worksheets: _loadWorksheets(),
   activeWorksheetId: parseInt(localStorage.getItem('terminal_active_ws') || '1', 10),
-  wlMaximized: false,
+  wlViewMode: '1-split', // 'max', '1-split', '2-split'
   wlQuoteData: {},                  // keyed by symbol
   wlEditingSymbol: null,
   wlSortCol: null,
@@ -3362,39 +3362,63 @@ function renderWatchlist(container) {
     `;
   }).join('');
 
-  // Right-hand Panel (Chart or News)
+  // View Modes and Right-hand Panel
   const isNewsMode = state.wlSplitMode === 'news';
   const splitTitle = isNewsMode ? `News \u2014 ${state.currentTicker || 'Select a ticker'}` : `Chart \u2014 ${state.currentTicker || 'Select a ticker'}`;
   
-  const splitPanel = state.wlMaximized ? '' : `
-    <div class="panel wl-chart-panel">
-      <div class="panel__header" style="display:flex; justify-content:space-between; align-items:center;">
-        <div class="panel__title"><span class="panel__title-dot"></span> ${splitTitle}</div>
-        <div class="panel__actions" style="display:flex; gap:10px;">
-           <span class="wl-split-toggle ${!isNewsMode ? 'wl-split-toggle--active' : ''}" onclick="toggleWlSplitMode(null, 'chart')">Chart</span>
-           <span class="wl-split-toggle ${isNewsMode ? 'wl-split-toggle--active' : ''}" onclick="toggleWlSplitMode(null, 'news')">News</span>
+  const isMax = state.wlViewMode === 'max';
+  const is1Split = state.wlViewMode === '1-split';
+  const is2Split = state.wlViewMode === '2-split';
+
+  let splitPanel = '';
+  if (is1Split) {
+    splitPanel = `
+      <div class="panel wl-chart-panel">
+        <div class="panel__header" style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="panel__title"><span class="panel__title-dot"></span> ${splitTitle}</div>
+          <div class="panel__actions" style="display:flex; gap:10px;">
+             <span class="wl-split-toggle ${!isNewsMode ? 'wl-split-toggle--active' : ''}" onclick="toggleWlSplitMode(null, 'chart')">Chart</span>
+             <span class="wl-split-toggle ${isNewsMode ? 'wl-split-toggle--active' : ''}" onclick="toggleWlSplitMode(null, 'news')">News</span>
+          </div>
+        </div>
+        <div class="panel__body" id="wl-split-container" style="overflow-y:auto; padding:0"></div>
+      </div>
+    `;
+  } else if (is2Split) {
+    splitPanel = `
+      <div class="wl-chart-panel" style="display:flex; flex-direction:column; gap:var(--gap); background:transparent; border:none;">
+        <div class="panel" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+          <div class="panel__header">
+            <div class="panel__title"><span class="panel__title-dot"></span> Chart \u2014 ${state.currentTicker || 'Select a ticker'}</div>
+          </div>
+          <div class="panel__body" id="wl-split-chart-container" style="overflow:hidden; padding:0;"></div>
+        </div>
+        <div class="panel" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+          <div class="panel__header">
+            <div class="panel__title"><span class="panel__title-dot"></span> News \u2014 ${state.currentTicker || 'Select a ticker'}</div>
+          </div>
+          <div class="panel__body" id="wl-split-news-container" style="overflow-y:auto; padding:0;"></div>
         </div>
       </div>
-      <div class="panel__body" id="wl-split-container" style="overflow-y:auto; padding:${isNewsMode ? '0' : '0'}"></div>
-    </div>
-  `;
+    `;
+  }
 
   container.innerHTML = `
-    <div class="wl-wrapper ${state.wlMaximized ? 'wl-wrapper--maximized' : ''}">
+    <div class="wl-wrapper ${isMax ? 'wl-wrapper--maximized' : ''}">
       <div class="wl-toolbar">
         <div class="ws-tabs">
           ${wsTabs}
           <button class="ws-tab ws-tab--add" onclick="addWorksheet()" title="Add worksheet">+</button>
         </div>
-        <div class="wl-toolbar__actions">
-          <button class="wl-toolbar-btn" onclick="toggleWlMaximize()" title="${state.wlMaximized ? 'Split view' : 'Maximize table'}">
-            ${state.wlMaximized ? '\u25f0' : '\u25a1'}
-          </button>
+        <div class="wl-toolbar__actions" style="display:flex; background:var(--bg-tertiary); border-radius:var(--radius); border:1px solid var(--border-primary); overflow:hidden;">
+          <button class="wl-split-toggle ${isMax ? 'wl-split-toggle--active' : ''}" onclick="setWlViewMode('max')" style="border-radius:0; border-right:1px solid var(--border-primary); padding:4px 8px;" title="Maximized Table">Max.</button>
+          <button class="wl-split-toggle ${is1Split ? 'wl-split-toggle--active' : ''}" onclick="setWlViewMode('1-split')" style="border-radius:0; border-right:1px solid var(--border-primary); padding:4px 8px;" title="Table + Chart/News">1-Split</button>
+          <button class="wl-split-toggle ${is2Split ? 'wl-split-toggle--active' : ''}" onclick="setWlViewMode('2-split')" style="border-radius:0; padding:4px 8px;" title="Table + Chart + News">2-Split</button>
         </div>
       </div>
 
       <div class="wl-content">
-        <div class="wl-table-panel ${state.wlMaximized ? 'wl-table-panel--full' : ''}">
+        <div class="wl-table-panel ${isMax ? 'wl-table-panel--full' : ''}">
           <div class="wl-table-scroll">
             <table class="wl-table">
               <thead>
@@ -3423,12 +3447,17 @@ function renderWatchlist(container) {
   `;
 
   // Inject content into right panel if not maximized
-  if (!state.wlMaximized && state.symbolLoaded) {
-    if (isNewsMode) {
-        // Render simple news list, passing the container
-        renderNewsListForWl('wl-split-container');
-    } else {
-        injectChart('wl-split-container', state.currentSymbol, state.currentExchange);
+  if (!isMax && state.symbolLoaded) {
+    if (is1Split) {
+      if (isNewsMode) {
+          // Render simple news list, passing the container
+          renderNewsListForWl('wl-split-container');
+      } else {
+          injectChart('wl-split-container', state.currentSymbol, state.currentExchange);
+      }
+    } else if (is2Split) {
+      injectChart('wl-split-chart-container', state.currentSymbol, state.currentExchange);
+      renderNewsListForWl('wl-split-news-container');
     }
   }
 
@@ -3795,8 +3824,8 @@ function renameWorksheet(id, newName) {
   }
 }
 
-function toggleWlMaximize() {
-  state.wlMaximized = !state.wlMaximized;
+function setWlViewMode(mode) {
+  state.wlViewMode = mode;
   if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
 }
 
@@ -3815,17 +3844,21 @@ function wlSortBy(col) {
 }
 
 function toggleWlSplitMode(symbol, mode) {
+  if (mode) state.wlSplitMode = mode;
   if (symbol) {
-    state.currentSymbol = `NASDAQ:${symbol}`; // Fallback if exchange not known precisely, usually loadSymbol manages it
+    let fullSym = `NASDAQ:${symbol}`;
+    let name = symbol;
     const ws = state.worksheets.find(w => w.id === state.activeWorksheetId);
     if (ws) {
         const t = ws.tickers.find(tk => tk.symbol === symbol);
-        if (t) state.currentSymbol = `${t.exchange}:${t.symbol}`;
+        if (t) {
+            fullSym = `${t.exchange}:${t.symbol}`;
+            name = t.name;
+        }
     }
-    state.currentTicker = symbol;
-    state.symbolLoaded = true;
+    loadSymbol(fullSym, undefined, name);
+    return;
   }
-  if (mode) state.wlSplitMode = mode;
   
   if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
 }
