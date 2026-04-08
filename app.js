@@ -5,6 +5,36 @@
    ═══════════════════════════════════════════════════════════ */
 
 // ── State ──
+
+// Load worksheets from localStorage, or create default
+const _defaultWorksheets = [
+  {
+    id: 1, name: 'Sheet 1', tickers: [
+      { symbol: 'AAPL', exchange: 'NASDAQ', name: 'Apple Inc.' },
+      { symbol: 'MSFT', exchange: 'NASDAQ', name: 'Microsoft Corp.' },
+      { symbol: 'GOOGL', exchange: 'NASDAQ', name: 'Alphabet Inc.' },
+      { symbol: 'AMZN', exchange: 'NASDAQ', name: 'Amazon.com Inc.' },
+      { symbol: 'TSLA', exchange: 'NASDAQ', name: 'Tesla Inc.' },
+      { symbol: 'NVDA', exchange: 'NASDAQ', name: 'NVIDIA Corp.' },
+      { symbol: 'META', exchange: 'NASDAQ', name: 'Meta Platforms' },
+      { symbol: 'JPM', exchange: 'NYSE', name: 'JPMorgan Chase' },
+      { symbol: 'V', exchange: 'NYSE', name: 'Visa Inc.' },
+      { symbol: 'BRK.B', exchange: 'NYSE', name: 'Berkshire Hathaway' },
+    ]
+  }
+];
+
+function _loadWorksheets() {
+  try {
+    const raw = localStorage.getItem('terminal_worksheets');
+    if (raw) {
+      const ws = JSON.parse(raw);
+      if (Array.isArray(ws) && ws.length > 0) return ws;
+    }
+  } catch (_) { /* ignore */ }
+  return JSON.parse(JSON.stringify(_defaultWorksheets));
+}
+
 const state = {
   currentSymbol: 'NASDAQ:AAPL',   // TradingView format: EXCHANGE:TICKER
   currentExchange: 'NASDAQ',
@@ -19,18 +49,20 @@ const state = {
   exchangeMap: {},                  // Loaded from /api/exchanges
   searchResults: [],
   searchActiveIndex: -1,           // Keyboard nav index in dropdown
-  watchlist: [
-    { symbol: 'AAPL', exchange: 'NASDAQ', name: 'Apple Inc.' },
-    { symbol: 'MSFT', exchange: 'NASDAQ', name: 'Microsoft Corp.' },
-    { symbol: 'GOOGL', exchange: 'NASDAQ', name: 'Alphabet Inc.' },
-    { symbol: 'AMZN', exchange: 'NASDAQ', name: 'Amazon.com Inc.' },
-    { symbol: 'TSLA', exchange: 'NASDAQ', name: 'Tesla Inc.' },
-    { symbol: 'NVDA', exchange: 'NASDAQ', name: 'NVIDIA Corp.' },
-    { symbol: 'META', exchange: 'NASDAQ', name: 'Meta Platforms' },
-    { symbol: 'JPM', exchange: 'NYSE', name: 'JPMorgan Chase' },
-    { symbol: 'V', exchange: 'NYSE', name: 'Visa Inc.' },
-    { symbol: 'BRK.B', exchange: 'NYSE', name: 'Berkshire Hathaway' },
-  ],
+  // Worksheet-based watchlist
+  worksheets: _loadWorksheets(),
+  activeWorksheetId: parseInt(localStorage.getItem('terminal_active_ws') || '1', 10),
+  wlMaximized: false,
+  wlQuoteData: {},                  // keyed by symbol
+  wlEditingSymbol: null,
+  wlSortCol: null,
+  wlSortDir: 1,
+  wlSplitMode: 'chart',
+  // Backward compat — computed getter
+  get watchlist() {
+    const ws = this.worksheets.find(w => w.id === this.activeWorksheetId);
+    return ws ? ws.tickers : (this.worksheets[0]?.tickers || []);
+  },
   // Lightweight Charts instances (for cleanup)
   _lwCharts: [],
 };
@@ -61,6 +93,7 @@ function initTerminal() {
   initClock();
   initKeyboardShortcuts();
   initArticleModal();
+  initSymbolBarInput();
   renderTickerTape();
   // Start on the Home page — no ticker loaded until the user searches one.
   setActiveTab('home');
@@ -236,11 +269,65 @@ const FUNCTIONS = [
     implemented: true,
   },
   {
-    code: 'WL',
-    name: 'Watchlist',
-    desc: 'Your personalized watchlist',
-    aliases: ['WL', 'WATCHLIST'],
-    implemented: false,
+    code: 'W',
+    name: 'Worksheet',
+    desc: 'Your personalized worksheet',
+    aliases: ['W', 'WATCHLIST', 'WORKSHEET'],
+    implemented: true,
+    tabTarget: 'watchlist',
+  },
+  {
+    code: 'OMON',
+    name: 'Options Monitor',
+    desc: 'Options chain with Greeks & volume',
+    aliases: ['OMON', 'OPTIONS', 'CHAIN', 'OPTIONCHAIN'],
+    implemented: true,
+    stockSpecific: true,
+  },
+  {
+    code: 'IVOL',
+    name: 'Options Volatility',
+    desc: 'Implied volatility smile & skew curves',
+    aliases: ['IVOL', 'OVOL', 'VOLSMILE', 'VOLA'],
+    implemented: true,
+    stockSpecific: true,
+  },
+  // Bloomberg tab shortcuts — route to stock-context tabs
+  {
+    code: 'DES',
+    name: 'Description / Overview',
+    desc: 'Company overview & fundamentals',
+    aliases: ['DES', 'DESCRIPTION'],
+    implemented: true,
+    stockSpecific: true,
+    tabTarget: 'overview',
+  },
+  {
+    code: 'GP',
+    name: 'Graph / Chart',
+    desc: 'Price chart',
+    aliases: ['GP', 'GRAPH'],
+    implemented: true,
+    stockSpecific: true,
+    tabTarget: 'chart',
+  },
+  {
+    code: 'CN',
+    name: 'Company News',
+    desc: 'Latest news for the security',
+    aliases: ['CN', 'NEWS'],
+    implemented: true,
+    stockSpecific: true,
+    tabTarget: 'news',
+  },
+  {
+    code: 'FA',
+    name: 'Financial Analysis',
+    desc: 'Financial statements & ratios',
+    aliases: ['FA', 'FINANCIALS'],
+    implemented: true,
+    stockSpecific: true,
+    tabTarget: 'financials',
   },
 ];
 
@@ -259,14 +346,50 @@ function openFunction(code) {
     showToast(`${fn.code} — coming soon`);
     return;
   }
+
+  // Stock-specific functions require a loaded ticker
+  if (fn.stockSpecific && !state.symbolLoaded) {
+    showToast(`${fn.code} — load a ticker first`);
+    return;
+  }
+
+  // Dismiss search dropdown
+  clearSearch();
+
   state.activeFunction = code;
   state.activeTab = null;
 
-  // Hide stock-context UI
+  // Tab shortcut functions — route to the stock tab instead of a function view
+  if (fn.tabTarget) {
+    state.activeFunction = null;
+    setActiveTab(fn.tabTarget);
+    return;
+  }
+
+  // Stock-specific functions keep the symbol bar visible
   const navTabs = $('#nav-tabs');
   const symbolBar = $('#symbol-bar');
-  if (navTabs) navTabs.style.display = 'none';
-  if (symbolBar) symbolBar.style.display = 'none';
+  const fnBadge = $('#symbol-fn-badge');
+  const exchangeEl = $('#symbol-exchange');
+  const dividerEl = $('#symbol-divider');
+
+  if (fn.stockSpecific) {
+    if (navTabs) navTabs.style.display = 'none';
+    if (symbolBar) symbolBar.style.display = '';
+    // Show function badge in symbol bar, hide exchange
+    if (fnBadge) {
+      fnBadge.innerHTML = `<span class="symbol-bar__fn-code">${fn.code}</span> ${escHtml(fn.name)}`;
+      fnBadge.style.display = '';
+    }
+    if (exchangeEl) exchangeEl.style.display = 'none';
+    if (dividerEl) dividerEl.style.display = 'none';
+  } else {
+    if (navTabs) navTabs.style.display = 'none';
+    if (symbolBar) symbolBar.style.display = 'none';
+    if (fnBadge) fnBadge.style.display = 'none';
+    if (exchangeEl) exchangeEl.style.display = '';
+    if (dividerEl) dividerEl.style.display = '';
+  }
 
   destroyLightweightCharts();
 
@@ -277,6 +400,8 @@ function openFunction(code) {
     case 'MOST': renderMostActive(dashboard); break;
     case 'MOV':  renderIndexMovers(dashboard); break;
     case 'EQS':  renderEquityScreener(dashboard); break;
+    case 'OMON': renderOMON(dashboard); break;
+    case 'IVOL': renderIVOL(dashboard); break;
   }
   updateStatusBar();
 }
@@ -304,6 +429,7 @@ function showToast(message) {
 // ═══════════════════════════════════════
 
 let _searchAbort = null; // AbortController for cancelling in-flight searches
+let _searchClearing = false; // Guard flag to prevent dropdown re-opening during clearSearch()
 
 function initSearch() {
   const input = $('#ticker-input');
@@ -339,6 +465,7 @@ function initSearch() {
   }, 300);
 
   input.addEventListener('focus', () => {
+    if (_searchClearing) return;
     const val = input.value.trim();
     if (val.length > 0) {
       // Re-show results if we have them
@@ -353,11 +480,14 @@ function initSearch() {
 
   input.addEventListener('blur', () => {
     setTimeout(() => {
-      dropdown.classList.remove('recent-dropdown--visible');
+      if (!_searchClearing) {
+        dropdown.classList.remove('recent-dropdown--visible');
+      }
     }, 200);
   });
 
   input.addEventListener('input', () => {
+    if (_searchClearing) return;
     const val = input.value.trim();
     if (val.length > 0) {
       debouncedSearch(val);
@@ -451,6 +581,11 @@ function initSearch() {
       input.blur();
       dropdown.classList.remove('recent-dropdown--visible');
       state.searchActiveIndex = -1;
+      
+      // If we press Escape from the search bar, navigate home (Bloomberg 2nd ESC behavior)
+      if (state.activeTab !== 'home') {
+        setActiveTab('home');
+      }
     }
   });
 }
@@ -535,12 +670,17 @@ function renderSearchResults(results, query) {
 }
 
 function clearSearch() {
+  _searchClearing = true;
   const input = $('#ticker-input');
   if (input) { input.value = ''; input.blur(); }
   const dropdown = $('#recent-dropdown');
-  if (dropdown) dropdown.classList.remove('recent-dropdown--visible');
+  if (dropdown) {
+    dropdown.classList.remove('recent-dropdown--visible');
+    dropdown.innerHTML = '';
+  }
   state.searchResults = [];
   state.searchActiveIndex = -1;
+  setTimeout(() => { _searchClearing = false; }, 50);
 }
 
 function renderWatchlistFilter(query) {
@@ -667,7 +807,8 @@ function loadSymbol(fullSymbol, tvSupported, companyName, yfExchange) {
 }
 
 function updateSymbolBar(companyName) {
-  $('#symbol-ticker').textContent = state.currentTicker;
+  const tickerInput = $('#symbol-ticker-input');
+  if (tickerInput) tickerInput.value = state.currentTicker;
   // Show the TV prefix in the symbol bar (cleaner than the internal
   // key — e.g. "EURONEXT" instead of "EURONEXT_AMS").
   $('#symbol-exchange').textContent = state.currentSymbol.split(':')[0];
@@ -687,6 +828,48 @@ function updateSymbolBar(companyName) {
       }
     });
   }
+}
+
+// ── Symbol bar editable ticker input ──
+function initSymbolBarInput() {
+  const input = $('#symbol-ticker-input');
+  if (!input) return;
+
+  // Select all text on focus for easy replacement
+  input.addEventListener('focus', () => {
+    input.select();
+  });
+
+  // Enter = confirm ticker change
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const val = input.value.trim().toUpperCase();
+      if (val && val !== state.currentTicker) {
+        // Try to load as a ticker
+        const currentFunction = state.activeFunction;
+        loadSymbol(`NASDAQ:${val}`, true);
+        // Re-open the same function after ticker change
+        if (currentFunction) {
+          setTimeout(() => openFunction(currentFunction), 300);
+        }
+      }
+      input.blur();
+    }
+    if (e.key === 'Escape') {
+      // Revert to current ticker and blur
+      input.value = state.currentTicker;
+      input.blur();
+      if (state.activeTab !== 'home') {
+        setActiveTab('home');
+      }
+    }
+  });
+
+  // Revert on blur if not confirmed
+  input.addEventListener('blur', () => {
+    input.value = state.currentTicker;
+  });
 }
 
 
@@ -780,6 +963,13 @@ function loadTabContent(tabName) {
   } else if (state.symbolLoaded) {
     if (symbolBar) symbolBar.style.display = '';
     if (navTabs) navTabs.style.display = '';
+    // Restore exchange info, hide function badge when back on stock tabs
+    const fnBadge = $('#symbol-fn-badge');
+    const exchangeEl = $('#symbol-exchange');
+    const dividerEl = $('#symbol-divider');
+    if (fnBadge) fnBadge.style.display = 'none';
+    if (exchangeEl) exchangeEl.style.display = '';
+    if (dividerEl) dividerEl.style.display = '';
   }
 
   // Ticker-bound tab requested without a loaded symbol → fall back to Home.
@@ -2863,6 +3053,49 @@ async function loadNewsContent() {
   `;
 }
 
+async function renderNewsListForWl(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="news__loading" style="padding: 20px;">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Loading news...</div>
+    </div>
+  `;
+
+  // Fetch or reuse news
+  if (!state.newsData || state.currentTicker !== state._lastNewsTicker) {
+    state.newsData = await fetchNews(state.currentTicker, state.currentExchange);
+    state._lastNewsTicker = state.currentTicker;
+  }
+
+  if (!state.newsData || state.newsData.error || state.newsData.length === 0) {
+    container.innerHTML = `
+      <div class="news__empty" style="padding: 20px;">
+        <p>${state.newsData?.error || 'No news available for this ticker.'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  const articles = state.newsData;
+
+  container.innerHTML = `
+    <div class="news-feed" style="margin-top: 0;">
+      ${articles.map((a) => `
+        <div class="news-feed__item" onclick="openArticle(${JSON.stringify(a.link).replace(/"/g, '&quot;')}, ${JSON.stringify(a.title).replace(/"/g, '&quot;')}, ${JSON.stringify(a.publisher).replace(/"/g, '&quot;')}, ${a.publishedAt})">
+          <span class="news-feed__time">${timeAgo(a.publishedAt)}</span>
+          <div class="news-feed__content">
+            <div class="news-feed__title" style="white-space: normal; line-height: 1.3;">${escHtml(a.title)}</div>
+            <div class="news-feed__publisher">${escHtml(a.publisher)}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 
 // ═══════════════════════════════════════
 // ARTICLE READER MODAL
@@ -2978,35 +3211,225 @@ function renderProfile(container) {
 // ═══════════════════════════════════════
 
 function renderWatchlist(container) {
-  container.className = 'dashboard dashboard--overview';
-  container.innerHTML = `
-    <div class="panel">
-      <div class="panel__header">
-        <div class="panel__title"><span class="panel__title-dot"></span> Chart — ${state.currentTicker}</div>
+  container.className = 'dashboard dashboard--watchlist';
+
+  const ws = state.worksheets.find(w => w.id === state.activeWorksheetId);
+  let tickers = ws ? [...ws.tickers] : [];
+
+  // Sorting
+  if (state.wlSortCol) {
+    tickers.sort((a, b) => {
+      let valA, valB;
+      const qA = state.wlQuoteData[a.symbol] || {};
+      const qB = state.wlQuoteData[b.symbol] || {};
+      
+      switch (state.wlSortCol) {
+        case 'ticker': valA = a.symbol; valB = b.symbol; break;
+        case 'name': valA = a.name; valB = b.name; break;
+        case 'last': valA = qA.last || 0; valB = qB.last || 0; break;
+        case 'chg': valA = qA.change || 0; valB = qB.change || 0; break;
+        case 'chgpct': valA = qA.changePct || 0; valB = qB.changePct || 0; break;
+        case 'rvol': valA = qA.relativeVolume || 0; valB = qB.relativeVolume || 0; break;
+        default: valA = 0; valB = 0;
+      }
+      
+      if (valA < valB) return -1 * state.wlSortDir;
+      if (valA > valB) return 1 * state.wlSortDir;
+      return 0;
+    });
+  }
+
+  // Worksheet tabs
+  const wsTabs = state.worksheets.map(w => {
+    const active = w.id === state.activeWorksheetId;
+    return `
+      <div class="ws-tab ${active ? 'ws-tab--active' : ''}" onclick="switchWorksheet(${w.id})">
+        <span class="ws-tab__name">${escHtml(w.name)}</span>
+        ${state.worksheets.length > 1 ? `<span class="ws-tab__close" onclick="event.stopPropagation(); deleteWorksheet(${w.id})" title="Delete worksheet">&times;</span>` : ''}
       </div>
-      <div class="panel__body" id="wl-chart-container"></div>
-    </div>
-    <div class="panel">
-      <div class="panel__header">
-        <div class="panel__title"><span class="panel__title-dot"></span> Watchlist</div>
-        <div class="panel__actions">
-          <button class="panel__action-btn" onclick="addToWatchlist()" title="Add current ticker">+</button>
+    `;
+  }).join('');
+
+  // Persistent Add-ticker row HTML
+  const addRowHtml = `
+    <tr id="wl-add-row" class="wl-row wl-row--add">
+      <td colspan="9" class="wl-add-cell">
+        <div class="wl-add-wrapper">
+          <input type="text" id="wl-add-input" class="wl-add-input" placeholder="+ Add Ticker..."
+                 oninput="wlAddTickerSearch(this.value)"
+                 onfocus="this.placeholder='Type ticker or company name...'"
+                 onblur="setTimeout(() => { if ($('#wl-add-dropdown')) $('#wl-add-dropdown').style.display = 'none'; }, 200);"
+                 onkeydown="if(event.key==='Escape'){this.value=''; this.blur();} else if(event.key==='Enter'){const d=document.getElementById('wl-add-dropdown'); if(d&&d.firstElementChild) d.firstElementChild.click();}" autocomplete="off" />
+          <div class="wl-add-dropdown" id="wl-add-dropdown" style="display:none"></div>
+        </div>
+      </td>
+    </tr>
+  `;
+
+  // Helper for News Heat bars
+  const renderHeatBars = (heat) => {
+    let bars = 0;
+    if (heat === 'low') bars = 1;
+    if (heat === 'medium') bars = 2;
+    if (heat === 'high') bars = 4; // Simplified to 0,1,2,4 mapping for the request "4 bars from left to right"
+    
+    // Create 4 bars
+    let html = '<div class="heat-bars">';
+    for (let i = 1; i <= 4; i++) {
+        html += `<div class="heat-bar ${i <= bars ? 'heat-bar--active' : ''}"></div>`;
+    }
+    html += '</div>';
+    return html;
+  };
+
+  const getSortIcon = (col) => {
+    if (state.wlSortCol !== col) return '';
+    return state.wlSortDir === 1 ? ' \u2191' : ' \u2193';
+  };
+
+  // Table rows
+  const rows = tickers.map((t, idx) => {
+    const q = state.wlQuoteData[t.symbol] || {};
+    const isActive = t.symbol === state.currentTicker;
+    
+    // Inline editing mode
+    if (state.wlEditingSymbol === t.symbol) {
+       return `
+        <tr class="wl-row wl-row--edit">
+            <td colspan="9" class="wl-add-cell">
+                <div class="wl-add-wrapper">
+                  <input type="text" id="wl-edit-input" class="wl-add-input" value="${escHtml(t.symbol)}" placeholder="Type to replace ticker..."
+                         oninput="wlEditTickerSearch(this.value)"
+                         onkeydown="if(event.key==='Escape'){state.wlEditingSymbol=null; wlUpdateTableData();} else if(event.key==='Enter'){const d=document.getElementById('wl-edit-dropdown'); if(d&&d.firstElementChild) d.firstElementChild.click();}" autocomplete="off" />
+                  <div class="wl-add-dropdown" id="wl-edit-dropdown" style="display:none"></div>
+                </div>
+            </td>
+        </tr>
+       `;
+    }
+
+    const last = q.last != null ? q.last.toFixed(2) : '\u2014';
+    let chgHtml = '\u2014';
+    let chgPctHtml = '\u2014';
+    if (q.change != null) {
+      const sign = q.change >= 0 ? '+' : '';
+      const cls = q.change >= 0 ? 'wl-pos' : 'wl-neg';
+      chgHtml = `<span class="${cls}">${sign}${q.change.toFixed(2)}</span>`;
+      chgPctHtml = `<span class="${cls}">${sign}${q.changePct.toFixed(2)}%</span>`;
+    }
+
+    let rvolHtml = '\u2014';
+    if (q.relativeVolume != null) {
+      const rvClass = q.relativeVolume >= 1.5 ? 'wl-rv-high' : q.relativeVolume >= 0.8 ? 'wl-rv-normal' : 'wl-rv-low';
+      rvolHtml = `<span class="${rvClass}">${q.relativeVolume.toFixed(1)}x</span>`;
+    }
+
+    let earningsHtml = '';
+    if (q.earningsPublished) {
+      earningsHtml = '<span class="wl-earnings wl-earnings--published" title="Earnings recently published">E</span>';
+    } else if (q.earningsUpcoming) {
+      earningsHtml = '<span class="wl-earnings wl-earnings--upcoming" title="Earnings upcoming">E</span>';
+    }
+
+    // click event for news heat switches split screen to CN for this ticker
+    const heatHtml = `<div onclick="event.stopPropagation(); toggleWlSplitMode('${escHtml(t.symbol)}', 'news');" class="heat-wrapper" title="News Heat">${renderHeatBars(q.newsHeat || '')}</div>`;
+
+    return `
+      <tr class="wl-row ${isActive ? 'wl-row--active' : ''}" data-wl-symbol="${escHtml(t.symbol)}"
+          onclick="toggleWlSplitMode('${escHtml(t.symbol)}', 'chart')"
+          ondblclick="startWlInlineEdit('${escHtml(t.symbol)}')">
+        <td class="wl-cell wl-ticker">${escHtml(t.symbol)}</td>
+        <td class="wl-cell wl-name">${escHtml(t.name || '')}</td>
+        <td class="wl-cell wl-num wl-last">${last}</td>
+        <td class="wl-cell wl-num wl-chg">${chgHtml}</td>
+        <td class="wl-cell wl-num wl-chg-pct">${chgPctHtml}</td>
+        <td class="wl-cell wl-num wl-rvol">${rvolHtml}</td>
+        <td class="wl-cell wl-indicator wl-earnings">${earningsHtml}</td>
+        <td class="wl-cell wl-indicator wl-heat">${heatHtml}</td>
+        <td class="wl-cell wl-actions">
+          <button class="wl-remove-btn" onclick="event.stopPropagation(); removeFromWatchlist('${escHtml(t.symbol)}')" title="Remove">&times;</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  // Right-hand Panel (Chart or News)
+  const isNewsMode = state.wlSplitMode === 'news';
+  const splitTitle = isNewsMode ? `News \u2014 ${state.currentTicker || 'Select a ticker'}` : `Chart \u2014 ${state.currentTicker || 'Select a ticker'}`;
+  
+  const splitPanel = state.wlMaximized ? '' : `
+    <div class="panel wl-chart-panel">
+      <div class="panel__header" style="display:flex; justify-content:space-between; align-items:center;">
+        <div class="panel__title"><span class="panel__title-dot"></span> ${splitTitle}</div>
+        <div class="panel__actions" style="display:flex; gap:10px;">
+           <span class="wl-split-toggle ${!isNewsMode ? 'wl-split-toggle--active' : ''}" onclick="toggleWlSplitMode(null, 'chart')">Chart</span>
+           <span class="wl-split-toggle ${isNewsMode ? 'wl-split-toggle--active' : ''}" onclick="toggleWlSplitMode(null, 'news')">News</span>
         </div>
       </div>
-      <div class="panel__body">
-        <ul class="watchlist">
-          ${state.watchlist.map((w) => `
-            <li class="watchlist__item ${w.symbol === state.currentTicker ? 'watchlist__item--active' : ''}"
-                onclick="loadSymbol('${w.exchange}:${w.symbol}')">
-              <span class="watchlist__ticker">${w.symbol}</span>
-              <span class="watchlist__name">${w.name}</span>
-            </li>
-          `).join('')}
-        </ul>
+      <div class="panel__body" id="wl-split-container" style="overflow-y:auto; padding:${isNewsMode ? '0' : '0'}"></div>
+    </div>
+  `;
+
+  container.innerHTML = `
+    <div class="wl-wrapper ${state.wlMaximized ? 'wl-wrapper--maximized' : ''}">
+      <div class="wl-toolbar">
+        <div class="ws-tabs">
+          ${wsTabs}
+          <button class="ws-tab ws-tab--add" onclick="addWorksheet()" title="Add worksheet">+</button>
+        </div>
+        <div class="wl-toolbar__actions">
+          <button class="wl-toolbar-btn" onclick="toggleWlMaximize()" title="${state.wlMaximized ? 'Split view' : 'Maximize table'}">
+            ${state.wlMaximized ? '\u25f0' : '\u25a1'}
+          </button>
+        </div>
+      </div>
+
+      <div class="wl-content">
+        <div class="wl-table-panel ${state.wlMaximized ? 'wl-table-panel--full' : ''}">
+          <div class="wl-table-scroll">
+            <table class="wl-table">
+              <thead>
+                <tr>
+                  <th class="wl-th" style="cursor:pointer" onclick="wlSortBy('ticker')">Ticker${getSortIcon('ticker')}</th>
+                  <th class="wl-th wl-th--name" style="cursor:pointer" onclick="wlSortBy('name')">Name${getSortIcon('name')}</th>
+                  <th class="wl-th wl-th--num" style="cursor:pointer" onclick="wlSortBy('last')">Last${getSortIcon('last')}</th>
+                  <th class="wl-th wl-th--num" style="cursor:pointer" onclick="wlSortBy('chg')">Chg${getSortIcon('chg')}</th>
+                  <th class="wl-th wl-th--num" style="cursor:pointer" onclick="wlSortBy('chgpct')">Chg%${getSortIcon('chgpct')}</th>
+                  <th class="wl-th wl-th--num" style="cursor:pointer" onclick="wlSortBy('rvol')">rVol${getSortIcon('rvol')}</th>
+                  <th class="wl-th wl-th--indicator" title="Earnings">E</th>
+                  <th class="wl-th wl-th--indicator" title="News Heat">News</th>
+                  <th class="wl-th wl-th--actions"></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+                ${addRowHtml}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        ${splitPanel}
       </div>
     </div>
   `;
-  injectChart('wl-chart-container', state.currentSymbol, state.currentExchange);
+
+  // Inject content into right panel if not maximized
+  if (!state.wlMaximized && state.symbolLoaded) {
+    if (isNewsMode) {
+        // Render simple news list, passing the container
+        renderNewsListForWl('wl-split-container');
+    } else {
+        injectChart('wl-split-container', state.currentSymbol, state.currentExchange);
+    }
+  }
+
+  // Set focus automatically if we were editing or add mode
+  if (state.wlEditingSymbol) {
+      setTimeout(() => { const i = $('#wl-edit-input'); if(i) { i.focus(); i.select(); } }, 50);
+  }
+
+  // Fetch enriched quotes
+  wlFetchQuotes();
 }
 
 
@@ -3297,13 +3720,280 @@ function renderTickerTape() {
 // WATCHLIST MANAGEMENT
 // ═══════════════════════════════════════
 
-function addToWatchlist() {
-  const { currentTicker: symbol, currentExchange: exchange } = state;
-  if (!state.watchlist.find((w) => w.symbol === symbol)) {
-    const name = state.companyInfo?.name || symbol;
-    state.watchlist.push({ symbol, exchange, name });
-    if (state.activeTab === 'watchlist') loadTabContent('watchlist');
+function saveWorksheets() {
+  localStorage.setItem('terminal_worksheets', JSON.stringify(state.worksheets));
+  localStorage.setItem('terminal_active_ws', String(state.activeWorksheetId));
+}
+
+function addToWatchlist(symbol, exchange, name) {
+  // If called without args, use current ticker
+  if (!symbol) {
+    symbol = state.currentTicker;
+    exchange = state.currentExchange;
+    name = state.companyInfo?.name || symbol;
   }
+  const ws = state.worksheets.find(w => w.id === state.activeWorksheetId);
+  if (!ws) return;
+  if (!ws.tickers.find(t => t.symbol === symbol)) {
+    ws.tickers.push({ symbol, exchange, name });
+    saveWorksheets();
+    if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+  }
+}
+
+function removeFromWatchlist(symbol) {
+  const ws = state.worksheets.find(w => w.id === state.activeWorksheetId);
+  if (!ws) return;
+  ws.tickers = ws.tickers.filter(t => t.symbol !== symbol);
+  saveWorksheets();
+  if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+}
+
+function addWorksheet() {
+  const maxId = Math.max(...state.worksheets.map(w => w.id), 0);
+  const newId = maxId + 1;
+  state.worksheets.push({ id: newId, name: `Sheet ${newId}`, tickers: [] });
+  state.activeWorksheetId = newId;
+  saveWorksheets();
+  if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+}
+
+function switchWorksheet(id) {
+  state.activeWorksheetId = id;
+  state.wlQuoteData = {};
+  saveWorksheets();
+  if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+}
+
+function deleteWorksheet(id) {
+  if (state.worksheets.length <= 1) {
+    showToast('Cannot delete the last worksheet');
+    return;
+  }
+  state.worksheets = state.worksheets.filter(w => w.id !== id);
+  if (state.activeWorksheetId === id) {
+    state.activeWorksheetId = state.worksheets[0].id;
+  }
+  saveWorksheets();
+  if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+}
+
+function renameWorksheet(id, newName) {
+  const ws = state.worksheets.find(w => w.id === id);
+  if (ws) {
+    ws.name = newName.trim() || ws.name;
+    saveWorksheets();
+  }
+}
+
+function toggleWlMaximize() {
+  state.wlMaximized = !state.wlMaximized;
+  if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+}
+
+// ── Worksheet Interactive Helpers ──
+
+function wlSortBy(col) {
+  if (state.wlSortCol === col) {
+    // Toggle direction or unsort
+    if (state.wlSortDir === 1) state.wlSortDir = -1;
+    else state.wlSortCol = null;
+  } else {
+    state.wlSortCol = col;
+    state.wlSortDir = 1;
+  }
+  if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+}
+
+function toggleWlSplitMode(symbol, mode) {
+  if (symbol) {
+    state.currentSymbol = `NASDAQ:${symbol}`; // Fallback if exchange not known precisely, usually loadSymbol manages it
+    const ws = state.worksheets.find(w => w.id === state.activeWorksheetId);
+    if (ws) {
+        const t = ws.tickers.find(tk => tk.symbol === symbol);
+        if (t) state.currentSymbol = `${t.exchange}:${t.symbol}`;
+    }
+    state.currentTicker = symbol;
+    state.symbolLoaded = true;
+  }
+  if (mode) state.wlSplitMode = mode;
+  
+  if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+}
+
+// Inline Editing
+function startWlInlineEdit(symbol) {
+  state.wlEditingSymbol = symbol;
+  if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+}
+
+async function wlEditTickerSearch(query) {
+  if (!query || query.length < 1) return;
+  try {
+    const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    const data = await resp.json();
+    const dropdown = document.getElementById('wl-edit-dropdown');
+    if (!dropdown) return;
+    const results = (Array.isArray(data) ? data : data.results || []).slice(0, 6);
+    if (results.length === 0) {
+      dropdown.innerHTML = '<div class="wl-add-no-results">No results</div>';
+      dropdown.style.display = 'block';
+      return;
+    }
+    dropdown.innerHTML = results.map(r => `
+      <div class="wl-add-result" onclick="wlSelectEditTicker('${escHtml(r.symbol)}', '${escHtml(r.exchange || '')}', '${escHtml(r.name || r.symbol)}')">
+        <span class="wl-add-result__ticker">${escHtml(r.symbol)}</span>
+        <span class="wl-add-result__name">${escHtml(r.name || '')}</span>
+      </div>
+    `).join('');
+    dropdown.style.display = 'block';
+  } catch (e) {
+    console.error('Watchlist edit search error:', e);
+  }
+}
+
+function wlSelectEditTicker(newSymbol, newExchange, newName) {
+  const ws = state.worksheets.find(w => w.id === state.activeWorksheetId);
+  if (ws && state.wlEditingSymbol) {
+    const idx = ws.tickers.findIndex(t => t.symbol === state.wlEditingSymbol);
+    if (idx !== -1) {
+      ws.tickers[idx] = { symbol: newSymbol, exchange: newExchange, name: newName };
+      saveWorksheets();
+    }
+  }
+  state.wlEditingSymbol = null;
+  wlFetchQuotes();
+  if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+}
+
+// Add Row (Persistent)
+async function wlAddTickerSearch(query) {
+  if (!query || query.length < 1) return;
+  try {
+    const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    const data = await resp.json();
+    const dropdown = document.getElementById('wl-add-dropdown');
+    if (!dropdown) return;
+    const results = (Array.isArray(data) ? data : data.results || []).slice(0, 6);
+    if (results.length === 0) {
+      dropdown.innerHTML = '<div class="wl-add-no-results">No results</div>';
+      dropdown.style.display = 'block';
+      return;
+    }
+    dropdown.innerHTML = results.map(r => `
+      <div class="wl-add-result" onclick="wlSelectAddTicker('${escHtml(r.symbol)}', '${escHtml(r.exchange || '')}', '${escHtml(r.name || r.symbol)}')">
+        <span class="wl-add-result__ticker">${escHtml(r.symbol)}</span>
+        <span class="wl-add-result__name">${escHtml(r.name || '')}</span>
+      </div>
+    `).join('');
+    dropdown.style.display = 'block';
+  } catch (e) {
+    console.error('Watchlist add search error:', e);
+  }
+}
+
+function wlSelectAddTicker(symbol, exchange, name) {
+  addToWatchlist(symbol, exchange, name);
+  const addInput = document.getElementById('wl-add-input');
+  if (addInput) addInput.value = '';
+  wlFetchQuotes();
+}
+
+function wlCancelAdd() {
+  const addInput = document.getElementById('wl-add-input');
+  if (addInput) {
+      addInput.value = '';
+      addInput.blur();
+  }
+}
+
+// ── Fetch enriched quote data for all tickers in active worksheet ──
+async function wlFetchQuotes() {
+  const tickers = state.watchlist.map(t => t.symbol);
+  if (tickers.length === 0) return;
+
+  try {
+    const resp = await fetch(`/api/watchlist/quotes?tickers=${encodeURIComponent(tickers.join(','))}`);
+    const data = await resp.json();
+    if (data.quotes) {
+      data.quotes.forEach(q => {
+        state.wlQuoteData[q.symbol] = q;
+      });
+      wlUpdateTableData();
+
+      // Fire lazy enrichment per ticker (non-blocking)
+      tickers.forEach(sym => wlEnrichTicker(sym));
+    }
+  } catch (e) {
+    console.error('Watchlist quotes fetch error:', e);
+  }
+}
+
+async function wlEnrichTicker(symbol) {
+  try {
+    const resp = await fetch(`/api/watchlist/enrich/${encodeURIComponent(symbol)}`);
+    const data = await resp.json();
+    if (state.wlQuoteData[symbol]) {
+      Object.assign(state.wlQuoteData[symbol], data);
+      wlUpdateTableData();
+    }
+  } catch (e) {
+    // Non-critical — enrichment is optional
+  }
+}
+
+// ── Update table cells in place (no full re-render) ──
+function wlUpdateTableData() {
+  state.watchlist.forEach(t => {
+    const q = state.wlQuoteData[t.symbol];
+    if (!q) return;
+    
+    const row = document.querySelector(`[data-wl-symbol="${t.symbol}"]`);
+    if (!row) return;
+
+    const setCell = (cls, val) => {
+      const el = row.querySelector(`.${cls}`);
+      if (el) el.textContent = val;
+    };
+    const setCellHtml = (cls, html) => {
+      const el = row.querySelector(`.${cls}`);
+      if (el) el.innerHTML = html;
+    };
+
+    setCell('wl-last', q.last != null ? q.last.toFixed(2) : '\u2014');
+    
+    if (q.change != null) {
+      const sign = q.change >= 0 ? '+' : '';
+      const cls = q.change >= 0 ? 'wl-pos' : 'wl-neg';
+      setCellHtml('wl-chg', `<span class="${cls}">${sign}${q.change.toFixed(2)}</span>`);
+      setCellHtml('wl-chg-pct', `<span class="${cls}">${sign}${q.changePct.toFixed(2)}%</span>`);
+    }
+
+    if (q.relativeVolume != null) {
+      const rvClass = q.relativeVolume >= 1.5 ? 'wl-rv-high' : q.relativeVolume >= 0.8 ? 'wl-rv-normal' : 'wl-rv-low';
+      setCellHtml('wl-rvol', `<span class="${rvClass}">${q.relativeVolume.toFixed(1)}x</span>`);
+    } else {
+      setCell('wl-rvol', '\u2014');
+    }
+
+    // Earnings indicator
+    let earningsHtml = '';
+    if (q.earningsPublished) {
+      earningsHtml = '<span class="wl-earnings wl-earnings--published" title="Earnings recently published">E</span>';
+    } else if (q.earningsUpcoming) {
+      earningsHtml = '<span class="wl-earnings wl-earnings--upcoming" title="Earnings upcoming">E</span>';
+    }
+    setCellHtml('wl-earnings', earningsHtml);
+
+    // News heat
+    let heatHtml = '';
+    if (q.newsHeat === 'high') {
+      heatHtml = '<span class="wl-heat wl-heat--high" title="High news activity">🔥</span>';
+    } else if (q.newsHeat === 'medium') {
+      heatHtml = '<span class="wl-heat wl-heat--medium" title="Some news activity">●</span>';
+    }
+    setCellHtml('wl-heat', heatHtml);
+  });
 }
 
 
@@ -3370,20 +4060,44 @@ function setDataSource(source) {
 
 function initKeyboardShortcuts() {
   document.addEventListener('keydown', (e) => {
-    // Don't trigger in inputs
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    // Don't trigger shortcuts when typing in inputs (except ticker input ESC)
+    const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+    const isTickerInput = e.target.id === 'symbol-ticker-input';
 
-    // Escape closes article modal
+    if (inInput && !isTickerInput) return;
+    // Let the ticker input handle its own Enter/Escape
+    if (isTickerInput) return;
+
+    // Escape — multi-level Bloomberg behavior
     if (e.key === 'Escape') {
       // Priority 1: close article modal if open
       const modal = document.getElementById('article-modal');
+      const addRowInput = document.getElementById('wl-add-input');
+      
       if (modal && modal.classList.contains('article-modal--visible')) {
         closeArticleModal();
         return;
       }
-      // Priority 2: return to Home (Bloomberg-style)
+      
+      // Special case: if focused in the worksheet add row
+      if (addRowInput && document.activeElement === addRowInput) {
+        wlCancelAdd();
+        return;
+      }
+
+      // Priority 2: if in a stock-specific function and symbol input NOT focused -> focus symbol input
+      const symbolInput = $('#symbol-ticker-input');
+      if (document.activeElement !== symbolInput && (state.activeFunction || state.symbolLoaded)) {
+        if (symbolInput) {
+          symbolInput.focus();
+          return;
+        }
+      }
+
+      // Priority 3: return to Home (if already focused, or if no stock loaded)
       if (state.activeTab !== 'home') {
         setActiveTab('home');
+        if (symbolInput) symbolInput.blur();
       }
       return;
     }
@@ -3395,11 +4109,582 @@ function initKeyboardShortcuts() {
     }
 
     // 1-6 = ticker tabs (only active when a symbol is loaded).
-    // Bindings are stock-context for now; future: asset-class-aware.
     if (e.key >= '1' && e.key <= '6' && state.symbolLoaded) {
       const tabs = ['overview', 'chart', 'news', 'financials', 'profile', 'watchlist'];
       const idx = parseInt(e.key) - 1;
       if (tabs[idx]) setActiveTab(tabs[idx]);
     }
+  });
+}
+
+
+// ═══════════════════════════════════════
+// OMON — OPTIONS MONITOR (CHAIN)
+// ═══════════════════════════════════════
+
+const omonState = {
+  expiration: null,
+  expirations: [],
+  chain: null,
+  loading: false,
+  greeksVisible: true,
+};
+
+function renderOMON(container) {
+  container.className = 'dashboard dashboard--function';
+  container.innerHTML = `
+    <div class="function-wrapper">
+      <div class="function-toolbar">
+        <div class="function-toolbar__label">Expiry</div>
+        <div class="omon-expiry-pills" id="omon-expiry-pills">
+          <div class="evts-loading" style="padding:4px 12px">
+            <div class="search-loading__spinner"></div>
+            <span>Loading expirations…</span>
+          </div>
+        </div>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:8px">
+          <button class="country-btn country-btn--active" id="omon-greeks-toggle" onclick="omonToggleGreeks()">Greeks</button>
+          <button class="country-btn" onclick="openFunction('IVOL')">Vol Curve ↗</button>
+        </div>
+      </div>
+
+      <div class="omon-summary" id="omon-summary"></div>
+
+      <div class="panel function-panel">
+        <div class="panel__body" id="omon-chain-container">
+          <div class="evts-loading">
+            <div class="search-loading__spinner"></div>
+            <span>Select an expiration date…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  omonLoadExpirations();
+}
+
+async function omonLoadExpirations() {
+  const exchange = state.currentExchange || '';
+  const ticker = state.currentTicker || '';
+
+  try {
+    const resp = await fetch(`/api/omon/expirations/${encodeURIComponent(ticker)}?exchange=${encodeURIComponent(exchange)}`);
+    const data = await resp.json();
+
+    if (data.error && (!data.expirations || data.expirations.length === 0)) {
+      const cont = document.getElementById('omon-chain-container');
+      if (cont) {
+        cont.innerHTML = `
+          <div class="omon-no-data">
+            <div class="omon-no-data__icon">⚠</div>
+            <div class="omon-no-data__title">No Options Data</div>
+            <div class="omon-no-data__msg">Options data is not available for ${escHtml(ticker)}. This feature is currently supported for US-listed stocks only.</div>
+          </div>
+        `;
+      }
+      document.getElementById('omon-expiry-pills').innerHTML = '<span class="text-muted" style="font-size:11px">No expirations</span>';
+      return;
+    }
+
+    omonState.expirations = data.expirations || [];
+    omonRenderExpiryPills();
+
+    // Auto-select the nearest expiration
+    if (omonState.expirations.length > 0) {
+      omonSelectExpiry(omonState.expirations[0].date);
+    }
+  } catch (err) {
+    console.error('OMON expirations error:', err);
+  }
+}
+
+function omonRenderExpiryPills() {
+  const el = document.getElementById('omon-expiry-pills');
+  if (!el) return;
+
+  el.innerHTML = omonState.expirations.map((exp) => `
+    <button class="country-btn ${exp.date === omonState.expiration ? 'country-btn--active' : ''}"
+            data-expiry="${exp.date}"
+            onclick="omonSelectExpiry('${exp.date}')">
+      ${escHtml(exp.label)}
+      <span class="omon-expiry-days">${exp.days}d</span>
+    </button>
+  `).join('');
+}
+
+async function omonSelectExpiry(expDate) {
+  omonState.expiration = expDate;
+  omonState.loading = true;
+  omonRenderExpiryPills();
+
+  const cont = document.getElementById('omon-chain-container');
+  if (cont) {
+    cont.innerHTML = `
+      <div class="evts-loading">
+        <div class="search-loading__spinner"></div>
+        <span>Loading chain for ${expDate}…</span>
+      </div>
+    `;
+  }
+
+  const exchange = state.currentExchange || '';
+  const ticker = state.currentTicker || '';
+
+  try {
+    const resp = await fetch(`/api/omon/chain/${encodeURIComponent(ticker)}?exchange=${encodeURIComponent(exchange)}&expiration=${encodeURIComponent(expDate)}`);
+    const data = await resp.json();
+    omonState.chain = data;
+    omonState.loading = false;
+    omonRenderChain();
+    omonRenderSummary();
+  } catch (err) {
+    console.error('OMON chain error:', err);
+    omonState.loading = false;
+    if (cont) {
+      cont.innerHTML = '<div class="omon-no-data"><div class="omon-no-data__icon">⚠</div><div>Error loading chain</div></div>';
+    }
+  }
+}
+
+function omonRenderSummary() {
+  const el = document.getElementById('omon-summary');
+  if (!el || !omonState.chain) return;
+
+  const s = omonState.chain.summary || {};
+  const price = omonState.chain.underlyingPrice;
+  const days = omonState.chain.daysToExpiry;
+
+  el.innerHTML = `
+    <div class="omon-summary__item">
+      <span class="omon-summary__label">Underlying</span>
+      <span class="omon-summary__value">$${price ? price.toLocaleString() : '—'}</span>
+    </div>
+    <div class="omon-summary__item">
+      <span class="omon-summary__label">DTE</span>
+      <span class="omon-summary__value">${days ?? '—'}</span>
+    </div>
+    <div class="omon-summary__sep"></div>
+    <div class="omon-summary__item">
+      <span class="omon-summary__label">Call Vol</span>
+      <span class="omon-summary__value omon-summary__value--call">${(s.callVolume ?? 0).toLocaleString()}</span>
+    </div>
+    <div class="omon-summary__item">
+      <span class="omon-summary__label">Put Vol</span>
+      <span class="omon-summary__value omon-summary__value--put">${(s.putVolume ?? 0).toLocaleString()}</span>
+    </div>
+    <div class="omon-summary__item">
+      <span class="omon-summary__label">P/C Ratio</span>
+      <span class="omon-summary__value">${s.pcRatio ?? '—'}</span>
+    </div>
+    <div class="omon-summary__sep"></div>
+    <div class="omon-summary__item">
+      <span class="omon-summary__label">Call OI</span>
+      <span class="omon-summary__value">${(s.callOI ?? 0).toLocaleString()}</span>
+    </div>
+    <div class="omon-summary__item">
+      <span class="omon-summary__label">Put OI</span>
+      <span class="omon-summary__value">${(s.putOI ?? 0).toLocaleString()}</span>
+    </div>
+  `;
+}
+
+function omonRenderChain() {
+  const container = document.getElementById('omon-chain-container');
+  if (!container || !omonState.chain) return;
+
+  const { calls, puts, underlyingPrice } = omonState.chain;
+  const showGreeks = omonState.greeksVisible;
+
+  // Build unified strike list
+  const strikeSet = new Set();
+  calls.forEach((c) => strikeSet.add(c.strike));
+  puts.forEach((p) => strikeSet.add(p.strike));
+  const strikes = Array.from(strikeSet).sort((a, b) => a - b);
+
+  // Index by strike
+  const callMap = {};
+  calls.forEach((c) => { callMap[c.strike] = c; });
+  const putMap = {};
+  puts.forEach((p) => { putMap[p.strike] = p; });
+
+  // Greek headers — CALLS: read right-to-left from strike (Vega furthest left)
+  const greekHeadersCall = showGreeks
+    ? '<th class="omon-th omon-th--greek">Vega</th><th class="omon-th omon-th--greek">Theta</th><th class="omon-th omon-th--greek">Gamma</th><th class="omon-th omon-th--greek">Delta</th>'
+    : '';
+  // Greek headers — PUTS: read left-to-right from strike (Vega furthest right)
+  const greekHeadersPut = showGreeks
+    ? '<th class="omon-th omon-th--greek">Delta</th><th class="omon-th omon-th--greek">Gamma</th><th class="omon-th omon-th--greek">Theta</th><th class="omon-th omon-th--greek">Vega</th>'
+    : '';
+
+  let html = `
+    <div class="omon-chain-scroll">
+      <table class="omon-table">
+        <thead>
+          <tr>
+            <th colspan="${showGreeks ? 10 : 6}" class="omon-th-group omon-th-group--call">CALLS</th>
+            <th class="omon-th-group omon-th-group--strike">STRIKE</th>
+            <th colspan="${showGreeks ? 10 : 6}" class="omon-th-group omon-th-group--put">PUTS</th>
+          </tr>
+          <tr>
+            ${greekHeadersCall}
+            <th class="omon-th">Open Interest</th>
+            <th class="omon-th">Volume</th>
+            <th class="omon-th omon-th--iv">IV</th>
+            <th class="omon-th omon-th--last">Last</th>
+            <th class="omon-th">Bid</th>
+            <th class="omon-th">Ask</th>
+            <th class="omon-th omon-th--strike"></th>
+            <th class="omon-th">Bid</th>
+            <th class="omon-th">Ask</th>
+            <th class="omon-th omon-th--last">Last</th>
+            <th class="omon-th omon-th--iv">IV</th>
+            <th class="omon-th">Volume</th>
+            <th class="omon-th">Open Interest</th>
+            ${greekHeadersPut}
+          </tr>
+        </thead>
+        <tbody>
+  `;
+
+  strikes.forEach((strike) => {
+    const c = callMap[strike] || {};
+    const p = putMap[strike] || {};
+    const callITM = strike < underlyingPrice;
+    const putITM = strike > underlyingPrice;
+    const atm = Math.abs(strike - underlyingPrice) / underlyingPrice < 0.005;
+
+    const fmtG = (v) => v != null && v !== undefined ? v.toFixed(3) : '\u2014';
+    const fmtN = (v) => v != null && v !== undefined ? Number(v).toLocaleString() : '\u2014';
+    const fmtP = (v) => v != null && v !== undefined ? Number(v).toFixed(2) : '\u2014';
+
+    const callIV = c.impliedVolatility || 0;
+    const putIV = p.impliedVolatility || 0;
+
+    // Calls: Vega, Theta, Gamma, Delta (furthest to nearest from strike)
+    const callGreeks = showGreeks ? `
+      <td class="omon-td omon-td--greek ${callITM ? 'omon-cell--itm-call' : ''}">${fmtG(c.vega)}</td>
+      <td class="omon-td omon-td--greek ${callITM ? 'omon-cell--itm-call' : ''}">${fmtG(c.theta)}</td>
+      <td class="omon-td omon-td--greek ${callITM ? 'omon-cell--itm-call' : ''}">${fmtG(c.gamma)}</td>
+      <td class="omon-td omon-td--greek ${callITM ? 'omon-cell--itm-call' : ''}">${fmtG(c.delta)}</td>
+    ` : '';
+
+    // Puts: Delta, Gamma, Theta, Vega (nearest to furthest from strike)
+    const putGreeks = showGreeks ? `
+      <td class="omon-td omon-td--greek ${putITM ? 'omon-cell--itm-put' : ''}">${fmtG(p.delta)}</td>
+      <td class="omon-td omon-td--greek ${putITM ? 'omon-cell--itm-put' : ''}">${fmtG(p.gamma)}</td>
+      <td class="omon-td omon-td--greek ${putITM ? 'omon-cell--itm-put' : ''}">${fmtG(p.theta)}</td>
+      <td class="omon-td omon-td--greek ${putITM ? 'omon-cell--itm-put' : ''}">${fmtG(p.vega)}</td>
+    ` : '';
+
+    html += `
+      <tr class="omon-row ${atm ? 'omon-row--atm' : ''}">
+        ${callGreeks}
+        <td class="omon-td ${callITM ? 'omon-cell--itm-call' : ''}">${fmtN(c.openInterest)}</td>
+        <td class="omon-td ${callITM ? 'omon-cell--itm-call' : ''}">${fmtN(c.volume)}</td>
+        <td class="omon-td omon-td--iv ${callITM ? 'omon-cell--itm-call' : ''}">${callIV ? (callIV).toFixed(1) + '%' : '—'}</td>
+        <td class="omon-td omon-td--last ${callITM ? 'omon-cell--itm-call' : ''}">${fmtP(c.lastPrice)}</td>
+        <td class="omon-td omon-td--bid ${callITM ? 'omon-cell--itm-call' : ''}">${fmtP(c.bid)}</td>
+        <td class="omon-td omon-td--ask ${callITM ? 'omon-cell--itm-call' : ''}">${fmtP(c.ask)}</td>
+        <td class="omon-td omon-td--strike ${atm ? 'omon-td--atm' : ''}">${strike.toFixed(2)}</td>
+        <td class="omon-td omon-td--bid ${putITM ? 'omon-cell--itm-put' : ''}">${fmtP(p.bid)}</td>
+        <td class="omon-td omon-td--ask ${putITM ? 'omon-cell--itm-put' : ''}">${fmtP(p.ask)}</td>
+        <td class="omon-td omon-td--last ${putITM ? 'omon-cell--itm-put' : ''}">${fmtP(p.lastPrice)}</td>
+        <td class="omon-td omon-td--iv ${putITM ? 'omon-cell--itm-put' : ''}">${putIV ? (putIV).toFixed(1) + '%' : '—'}</td>
+        <td class="omon-td ${putITM ? 'omon-cell--itm-put' : ''}">${fmtN(p.volume)}</td>
+        <td class="omon-td ${putITM ? 'omon-cell--itm-put' : ''}">${fmtN(p.openInterest)}</td>
+        ${putGreeks}
+      </tr>
+    `;
+  });
+
+  html += '</tbody></table></div>';
+  container.innerHTML = html;
+
+  // Auto-scroll to ATM
+  setTimeout(() => {
+    const atmRow = container.querySelector('.omon-row--atm');
+    if (atmRow) {
+      atmRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, 100);
+}
+
+function omonToggleGreeks() {
+  omonState.greeksVisible = !omonState.greeksVisible;
+  const btn = document.getElementById('omon-greeks-toggle');
+  if (btn) btn.classList.toggle('country-btn--active', omonState.greeksVisible);
+  omonRenderChain();
+}
+
+
+// ═══════════════════════════════════════
+// IVOL — OPTIONS VOLATILITY CURVE
+// ═══════════════════════════════════════
+
+const ivolState = {
+  expirations: [],
+  selectedExpiries: [],
+  chartInstance: null,
+  data: null,
+};
+
+const IVOL_COLORS = [
+  { border: '#ff8c00', bg: 'rgba(255,140,0,0.08)' },
+  { border: '#26a69a', bg: 'rgba(38,166,154,0.08)' },
+  { border: '#42a5f5', bg: 'rgba(66,165,245,0.08)' },
+  { border: '#ab47bc', bg: 'rgba(171,71,188,0.08)' },
+  { border: '#ef5350', bg: 'rgba(239,83,80,0.08)' },
+  { border: '#66bb6a', bg: 'rgba(102,187,106,0.08)' },
+];
+
+function renderIVOL(container) {
+  container.className = 'dashboard dashboard--function';
+  container.innerHTML = `
+    <div class="function-wrapper">
+      <div class="function-toolbar">
+        <div class="function-toolbar__label">Expirations</div>
+        <div class="omon-expiry-pills" id="ivol-expiry-pills">
+          <div class="evts-loading" style="padding:4px 12px">
+            <div class="search-loading__spinner"></div>
+            <span>Loading…</span>
+          </div>
+        </div>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:8px">
+          <button class="country-btn" onclick="openFunction('OMON')">Chain ↗</button>
+        </div>
+      </div>
+
+      <div class="panel function-panel">
+        <div class="panel__body ovol-chart-panel" id="ivol-chart-container">
+          <canvas id="ivol-canvas"></canvas>
+        </div>
+      </div>
+    </div>
+  `;
+
+  ivolLoadData();
+}
+
+async function ivolLoadData() {
+  const exchange = state.currentExchange || '';
+  const ticker = state.currentTicker || '';
+
+  try {
+    const resp = await fetch(`/api/omon/expirations/${encodeURIComponent(ticker)}?exchange=${encodeURIComponent(exchange)}`);
+    const expData = await resp.json();
+
+    if (expData.error && (!expData.expirations || expData.expirations.length === 0)) {
+      document.getElementById('ivol-chart-container').innerHTML = `
+        <div class="omon-no-data">
+          <div class="omon-no-data__icon">⚠</div>
+          <div class="omon-no-data__title">No Options Data</div>
+          <div class="omon-no-data__msg">Options volatility data is not available for ${escHtml(ticker)}.</div>
+        </div>
+      `;
+      return;
+    }
+
+    ivolState.expirations = expData.expirations || [];
+    ivolState.selectedExpiries = ivolState.expirations.slice(0, 4).map((e) => e.date);
+    ivolRenderExpiryPills();
+    await ivolFetchCurves();
+  } catch (err) {
+    console.error('IVOL load error:', err);
+  }
+}
+
+function ivolRenderExpiryPills() {
+  const el = document.getElementById('ivol-expiry-pills');
+  if (!el) return;
+
+  el.innerHTML = ivolState.expirations.map((exp) => {
+    const active = ivolState.selectedExpiries.includes(exp.date);
+    const colorIdx = ivolState.selectedExpiries.indexOf(exp.date);
+    const dotColor = active && colorIdx >= 0 && colorIdx < IVOL_COLORS.length
+      ? IVOL_COLORS[colorIdx].border : '';
+    const dot = active && dotColor
+      ? `<span class="ovol-color-dot" style="background:${dotColor}"></span>` : '';
+    return `
+      <button class="country-btn ${active ? 'country-btn--active' : ''}"
+              onclick="ivolToggleExpiry('${exp.date}')">
+        ${dot}${escHtml(exp.label)}
+        <span class="omon-expiry-days">${exp.days}d</span>
+      </button>
+    `;
+  }).join('');
+}
+
+async function ivolToggleExpiry(expDate) {
+  const idx = ivolState.selectedExpiries.indexOf(expDate);
+  if (idx >= 0) {
+    if (ivolState.selectedExpiries.length <= 1) return;
+    ivolState.selectedExpiries.splice(idx, 1);
+  } else {
+    if (ivolState.selectedExpiries.length >= 6) {
+      showToast('Maximum 6 expirations');
+      return;
+    }
+    ivolState.selectedExpiries.push(expDate);
+    ivolState.selectedExpiries.sort();
+  }
+  ivolRenderExpiryPills();
+  await ivolFetchCurves();
+}
+
+async function ivolFetchCurves() {
+  const exchange = state.currentExchange || '';
+  const ticker = state.currentTicker || '';
+
+  try {
+    const resp = await fetch(
+      `/api/omon/volatility/${encodeURIComponent(ticker)}?exchange=${encodeURIComponent(exchange)}&expirations=${encodeURIComponent(ivolState.selectedExpiries.join(','))}`
+    );
+    const data = await resp.json();
+    ivolState.data = data;
+    ivolRenderChart();
+  } catch (err) {
+    console.error('IVOL fetch error:', err);
+  }
+}
+
+function ivolRenderChart() {
+  const canvas = document.getElementById('ivol-canvas');
+  if (!canvas || !ivolState.data) return;
+
+  if (ivolState.chartInstance) {
+    ivolState.chartInstance.destroy();
+    ivolState.chartInstance = null;
+  }
+
+  const { curves, underlyingPrice } = ivolState.data;
+  if (!curves || curves.length === 0) return;
+
+  const datasets = curves.map((curve, i) => {
+    const color = IVOL_COLORS[i % IVOL_COLORS.length];
+    return {
+      label: curve.label,
+      data: curve.points.map((pt) => ({ x: pt.strike, y: pt.iv })),
+      borderColor: color.border,
+      backgroundColor: color.bg,
+      borderWidth: 2.5,
+      pointRadius: 1.5,
+      pointHoverRadius: 5,
+      pointBackgroundColor: color.border,
+      tension: 0.3,
+      fill: true,
+    };
+  });
+
+  // Strike range — center around ATM ±30%
+  const rangeMin = underlyingPrice ? underlyingPrice * 0.7 : undefined;
+  const rangeMax = underlyingPrice ? underlyingPrice * 1.3 : undefined;
+
+  const ctx = canvas.getContext('2d');
+
+  // ATM vertical line plugin
+  const atmLinePlugin = {
+    id: 'atmLine',
+    afterDraw(chart) {
+      if (!underlyingPrice) return;
+      const xScale = chart.scales.x;
+      const yScale = chart.scales.y;
+      const xPixel = xScale.getPixelForValue(underlyingPrice);
+      if (xPixel < xScale.left || xPixel > xScale.right) return;
+
+      const ctx2 = chart.ctx;
+      ctx2.save();
+      ctx2.beginPath();
+      ctx2.setLineDash([4, 4]);
+      ctx2.strokeStyle = 'rgba(255,140,0,0.5)';
+      ctx2.lineWidth = 1.5;
+      ctx2.moveTo(xPixel, yScale.top);
+      ctx2.lineTo(xPixel, yScale.bottom);
+      ctx2.stroke();
+
+      // Label
+      ctx2.setLineDash([]);
+      ctx2.fillStyle = 'rgba(255,140,0,0.15)';
+      const label = 'ATM $' + underlyingPrice.toFixed(0);
+      const textWidth = ctx2.measureText(label).width;
+      ctx2.fillRect(xPixel - textWidth / 2 - 4, yScale.top + 2, textWidth + 8, 16);
+      ctx2.fillStyle = '#ff8c00';
+      ctx2.font = "10px 'JetBrains Mono', monospace";
+      ctx2.textAlign = 'center';
+      ctx2.fillText(label, xPixel, yScale.top + 14);
+      ctx2.restore();
+    },
+  };
+
+  ivolState.chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { datasets },
+    plugins: [atmLinePlugin],
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'nearest',
+        intersect: false,
+      },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: {
+            color: '#8a8f98',
+            font: { family: "'JetBrains Mono', 'Fira Code', monospace", size: 11 },
+            usePointStyle: true,
+            pointStyle: 'line',
+            padding: 16,
+          },
+        },
+        tooltip: {
+          backgroundColor: '#1a1a2e',
+          borderColor: '#2a2a3e',
+          borderWidth: 1,
+          titleColor: '#e0e0e0',
+          bodyColor: '#c0c0c0',
+          titleFont: { family: "'JetBrains Mono', monospace", size: 12 },
+          bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+          callbacks: {
+            title: (items) => 'Strike: $' + (items[0]?.parsed?.x?.toFixed(2) ?? '\u2014'),
+            label: (item) => '  ' + item.dataset.label + ': ' + item.parsed.y?.toFixed(1) + '% IV',
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          min: rangeMin,
+          max: rangeMax,
+          title: {
+            display: true,
+            text: 'Strike Price ($)',
+            color: '#8a8f98',
+            font: { family: "'JetBrains Mono', monospace", size: 11 },
+          },
+          ticks: {
+            color: '#6a6f78',
+            font: { family: "'JetBrains Mono', monospace", size: 10 },
+            callback: (v) => '$' + Number(v).toFixed(0),
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+        },
+        y: {
+          title: {
+            display: true,
+            text: 'Implied Volatility (%)',
+            color: '#8a8f98',
+            font: { family: "'JetBrains Mono', monospace", size: 11 },
+          },
+          ticks: {
+            color: '#6a6f78',
+            font: { family: "'JetBrains Mono', monospace", size: 10 },
+            callback: (v) => Number(v).toFixed(0) + '%',
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+        },
+      },
+    },
   });
 }

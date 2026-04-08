@@ -182,10 +182,18 @@
 
   <!-- ══════════ ACTIVE SYMBOL BAR ══════════ -->
   <div class="symbol-bar" id="symbol-bar" style="display:none">
-    <span class="symbol-bar__ticker" id="symbol-ticker">AAPL</span>
+    <input type="text"
+           class="symbol-bar__ticker-input"
+           id="symbol-ticker-input"
+           value="AAPL"
+           spellcheck="false"
+           autocomplete="off"
+           title="Click or press Esc to change ticker">
     <span class="symbol-bar__name" id="symbol-name">Apple Inc.</span>
-    <span class="symbol-bar__divider"></span>
+    <span class="symbol-bar__divider" id="symbol-divider"></span>
     <span class="text-muted" style="font-size: 11px;" id="symbol-exchange">NASDAQ</span>
+    <!-- Function badge (shown when in a stock-specific function) -->
+    <span class="symbol-bar__fn-badge" id="symbol-fn-badge" style="display:none"></span>
   </div>
 
   <!-- ══════════ NAV TABS (stock-context tabs, hidden on Home) ══════════ -->
@@ -270,6 +278,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="auth.js"></script>
