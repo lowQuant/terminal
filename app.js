@@ -751,6 +751,7 @@ function renderRecentDropdown() {
 // ═══════════════════════════════════════
 
 function loadSymbol(fullSymbol, tvSupported, companyName, yfExchange) {
+  clearSearch();
   const parts = fullSymbol.split(':');
   const tvPrefix = parts.length > 1 ? parts[0] : 'NASDAQ';
   state.currentTicker = parts.length > 1 ? parts[1] : parts[0];
@@ -960,7 +961,7 @@ function loadTabContent(tabName) {
   if (tabName === 'home') {
     if (symbolBar) symbolBar.style.display = 'none';
     if (navTabs) navTabs.style.display = 'none';
-  } else if (state.symbolLoaded) {
+  } else if (state.symbolLoaded || tabName === 'watchlist') {
     if (symbolBar) symbolBar.style.display = '';
     if (navTabs) navTabs.style.display = '';
     // Restore exchange info, hide function badge when back on stock tabs
@@ -972,10 +973,18 @@ function loadTabContent(tabName) {
     if (dividerEl) dividerEl.style.display = '';
   }
 
-  // Ticker-bound tab requested without a loaded symbol → fall back to Home.
+  // Ticker-bound tab requested without a loaded symbol → fall back to Home (or auto-load Watchlist).
   if (tabName !== 'home' && !state.symbolLoaded) {
-    setActiveTab('home');
-    return;
+    if (tabName === 'watchlist') {
+      if (state.watchlist && state.watchlist.length > 0) {
+        const first = state.watchlist[0];
+        loadSymbol(`${first.exchange}:${first.symbol}`);
+        return;
+      }
+    } else {
+      setActiveTab('home');
+      return;
+    }
   }
 
   switch (tabName) {
@@ -3336,7 +3345,7 @@ function renderWatchlist(container) {
 
     return `
       <tr class="wl-row ${isActive ? 'wl-row--active' : ''}" data-wl-symbol="${escHtml(t.symbol)}"
-          onclick="toggleWlSplitMode('${escHtml(t.symbol)}', 'chart')"
+          onclick="toggleWlSplitMode('${escHtml(t.symbol)}')"
           ondblclick="startWlInlineEdit('${escHtml(t.symbol)}')">
         <td class="wl-cell wl-ticker">${escHtml(t.symbol)}</td>
         <td class="wl-cell wl-name">${escHtml(t.name || '')}</td>
