@@ -32,9 +32,10 @@ const userNav = document.getElementById('user-nav');
 const userDisplayName = document.getElementById('user-display-name');
 const loginForm = document.getElementById('login-form');
 const registerForm = document.getElementById('register-form');
+const waitlistForm = document.getElementById('waitlist-form');
 const loginError = document.getElementById('login-error');
 const registerError = document.getElementById('register-error');
-
+const waitlistError = document.getElementById('waitlist-error');
 const logoutBtn = document.getElementById('logout-btn');
 
 // ── Auth Tab Switching ──
@@ -47,13 +48,20 @@ document.querySelectorAll('[data-auth-tab]').forEach(tab => {
     if (target === 'login') {
       loginForm.style.display = '';
       registerForm.style.display = 'none';
-    } else {
+      waitlistForm.style.display = 'none';
+    } else if (target === 'register') {
       loginForm.style.display = 'none';
       registerForm.style.display = '';
+      waitlistForm.style.display = 'none';
+    } else if (target === 'waitlist') {
+      loginForm.style.display = 'none';
+      registerForm.style.display = 'none';
+      waitlistForm.style.display = '';
     }
     // Clear errors on tab switch
     loginError.textContent = '';
     registerError.textContent = '';
+    waitlistError.textContent = '';
   });
 });
 
@@ -153,30 +161,96 @@ loginForm.addEventListener('submit', async (e) => {
   processLogin(data.user);
 });
 
-// ── Waitlist Application ──
+// ── Email/Password Registration (Kept for Automation, Disabled in UI) ──
 registerForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   registerError.textContent = '';
   const firstName = document.getElementById('register-first').value.trim();
   const lastName = document.getElementById('register-last').value.trim();
   const email = document.getElementById('register-email').value.trim();
-  const featuresWanted = document.getElementById('register-features').value.trim();
+  const password = document.getElementById('register-password').value;
   const btn = document.getElementById('register-submit');
 
+  if (!email || !password) {
+    registerError.textContent = 'Email and password are required.';
+    return;
+  }
+
+  if (password.length < 8) {
+    registerError.textContent = 'Password must be at least 8 characters.';
+    return;
+  }
+
+  setSubmitting(btn, true);
+  auth.isRegistering = true;
+
+  if (!supabaseClient) {
+    registerError.textContent = 'Auth service not configured. Please set Supabase credentials in auth.js.';
+    setSubmitting(btn, false);
+    return;
+  }
+
+  const displayName = [firstName, lastName].filter(Boolean).join(' ') || email.split('@')[0];
+
+  const { data, error } = await supabaseClient.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        first_name: firstName,
+        last_name: lastName,
+        display_name: displayName,
+      },
+    },
+  });
+
+  setSubmitting(btn, false);
+
+  if (error) {
+    registerError.textContent = error.message;
+    return;
+  }
+
+  if (data.user && !data.user.confirmed_at && data.user.identities?.length === 0) {
+    registerError.textContent = 'An account with this email already exists.';
+    registerError.style.color = 'var(--red)';
+    return;
+  }
+
+  if (data.session) {
+    await supabaseClient.auth.signOut();
+  }
+
+  registerError.textContent = 'Account created successfully! Please follow your custom email instructions to activate.';
+  registerError.style.color = 'var(--green)';
+
+  document.getElementById('register-form').reset();
+  auth.isRegistering = false;
+});
+
+// ── Waitlist Application ──
+waitlistForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  waitlistError.textContent = '';
+  const firstName = document.getElementById('waitlist-first').value.trim();
+  const lastName = document.getElementById('waitlist-last').value.trim();
+  const email = document.getElementById('waitlist-email').value.trim();
+  const featuresWanted = document.getElementById('waitlist-features').value.trim();
+  const btn = document.getElementById('waitlist-submit');
+
   if (!email || !featuresWanted) {
-    registerError.textContent = 'Email and requested features are required.';
+    waitlistError.textContent = 'Email and requested features are required.';
     return;
   }
 
   setSubmitting(btn, true);
 
   if (!supabaseClient) {
-    registerError.textContent = 'Database service not configured. Please set Supabase credentials in auth.js.';
+    waitlistError.textContent = 'Database service not configured. Please set Supabase credentials in auth.js.';
     setSubmitting(btn, false);
     return;
   }
 
-  // Insert into waitlist table
   const { error } = await supabaseClient
     .from('waitlist')
     .insert([
@@ -191,21 +265,18 @@ registerForm.addEventListener('submit', async (e) => {
   setSubmitting(btn, false);
 
   if (error) {
-    // Handle specific unique constraint error
     if (error.code === '23505' || error.message.includes('duplicate')) {
-      registerError.textContent = 'You are already on the waitlist with this email!';
+      waitlistError.textContent = 'You are already on the waitlist with this email!';
     } else {
-      registerError.textContent = error.message;
+      waitlistError.textContent = error.message;
     }
     return;
   }
 
-  // Show a success message
-  registerError.textContent = 'Application received! We will notify you once selected for beta.';
-  registerError.style.color = 'var(--green)';
+  waitlistError.textContent = 'Application received! We will notify you once selected for beta.';
+  waitlistError.style.color = 'var(--green)';
   
-  // Clear the form fields
-  document.getElementById('register-form').reset();
+  document.getElementById('waitlist-form').reset();
 });
 
 

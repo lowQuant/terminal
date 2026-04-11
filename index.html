@@ -54,9 +54,10 @@
 
     <!-- Right: Auth Forms -->
     <div class="auth-card">
-      <div class="auth-card__header">
+      <div class="auth-card__header" style="flex-wrap: wrap; gap: 8px;">
         <button class="auth-tab auth-tab--active" data-auth-tab="login">Sign In</button>
-        <button class="auth-tab" data-auth-tab="register">Join Waitlist</button>
+        <button class="auth-tab" data-auth-tab="register">Create Account</button>
+        <button class="auth-tab" data-auth-tab="waitlist" style="flex-grow: 1;">Join Waitlist</button>
       </div>
 
       <!-- Login Form -->
@@ -76,7 +77,7 @@
         </button>
       </form>
 
-      <!-- Register Form -->
+      <!-- Register Form (Original code restored but disabled) -->
       <form id="register-form" class="auth-form" style="display:none" autocomplete="on">
         <div class="auth-form__row">
           <div class="auth-form__group">
@@ -93,11 +94,38 @@
           <input class="auth-form__input" type="email" id="register-email" name="email" placeholder="you@example.com" required autocomplete="email">
         </div>
         <div class="auth-form__group">
-          <label class="auth-form__label" for="register-features">What features/functions would you like to see?</label>
-          <textarea class="auth-form__input" id="register-features" name="features_wanted" placeholder="E.g., specific Bloomberg functions, macro data, etc." required rows="3" style="resize: vertical;"></textarea>
+          <label class="auth-form__label" for="register-password">Password</label>
+          <input class="auth-form__input" type="password" id="register-password" name="password" placeholder="Min. 8 characters" required minlength="8" autocomplete="new-password">
         </div>
         <div class="auth-form__error" id="register-error"></div>
-        <button class="auth-btn auth-btn--primary" type="submit" id="register-submit">
+        <button class="auth-btn auth-btn--primary" type="submit" id="register-submit" disabled style="opacity: 0.5; cursor: not-allowed;" title="Registration is currently closed">
+          <span class="auth-btn__text">Registration Disabled - Join Waitlist</span>
+          <span class="auth-btn__loader" hidden></span>
+        </button>
+      </form>
+
+      <!-- Waitlist Form -->
+      <form id="waitlist-form" class="auth-form" style="display:none" autocomplete="on">
+        <div class="auth-form__row">
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="waitlist-first">First Name</label>
+            <input class="auth-form__input" type="text" id="waitlist-first" name="first_name" placeholder="John" autocomplete="given-name">
+          </div>
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="waitlist-last">Last Name</label>
+            <input class="auth-form__input" type="text" id="waitlist-last" name="last_name" placeholder="Doe" autocomplete="family-name">
+          </div>
+        </div>
+        <div class="auth-form__group">
+          <label class="auth-form__label" for="waitlist-email">Email</label>
+          <input class="auth-form__input" type="email" id="waitlist-email" name="email" placeholder="you@example.com" required autocomplete="email">
+        </div>
+        <div class="auth-form__group">
+          <label class="auth-form__label" for="waitlist-features">What features/functions would you like to see?</label>
+          <textarea class="auth-form__input" id="waitlist-features" name="features_wanted" placeholder="E.g., specific Bloomberg functions, macro data, etc." required rows="3" style="resize: vertical;"></textarea>
+        </div>
+        <div class="auth-form__error" id="waitlist-error"></div>
+        <button class="auth-btn auth-btn--primary" type="submit" id="waitlist-submit">
           <span class="auth-btn__text">Apply for Beta</span>
           <span class="auth-btn__loader" hidden></span>
         </button>

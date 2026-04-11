@@ -11286,3 +11286,8 @@ KeyError: 'currentTradingPeriod'
 127.0.0.1 - - [11/Apr/2026 16:15:59] "GET /api/watchlist/enrich/JPM HTTP/1.1" 200 -
 127.0.0.1 - - [11/Apr/2026 16:15:59] "GET /api/watchlist/enrich/META HTTP/1.1" 200 -
 127.0.0.1 - - [11/Apr/2026 16:15:59] "GET /api/watchlist/enrich/V HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 16:18:31] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 16:18:31] "GET /styles.css HTTP/1.1" 304 -
+127.0.0.1 - - [11/Apr/2026 16:18:31] "GET /app.js HTTP/1.1" 304 -
+127.0.0.1 - - [11/Apr/2026 16:18:31] "GET /auth.js HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 16:18:32] "GET /api/exchanges HTTP/1.1" 200 -
