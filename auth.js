@@ -34,7 +34,7 @@ const loginForm = document.getElementById('login-form');
 const registerForm = document.getElementById('register-form');
 const loginError = document.getElementById('login-error');
 const registerError = document.getElementById('register-error');
-const googleLoginBtn = document.getElementById('google-login-btn');
+
 const logoutBtn = document.getElementById('logout-btn');
 
 // ── Auth Tab Switching ──
@@ -153,98 +153,61 @@ loginForm.addEventListener('submit', async (e) => {
   processLogin(data.user);
 });
 
-// ── Email/Password Registration ──
+// ── Waitlist Application ──
 registerForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   registerError.textContent = '';
   const firstName = document.getElementById('register-first').value.trim();
   const lastName = document.getElementById('register-last').value.trim();
   const email = document.getElementById('register-email').value.trim();
-  const password = document.getElementById('register-password').value;
+  const featuresWanted = document.getElementById('register-features').value.trim();
   const btn = document.getElementById('register-submit');
 
-  if (!email || !password) {
-    registerError.textContent = 'Email and password are required.';
-    return;
-  }
-
-  if (password.length < 8) {
-    registerError.textContent = 'Password must be at least 8 characters.';
+  if (!email || !featuresWanted) {
+    registerError.textContent = 'Email and requested features are required.';
     return;
   }
 
   setSubmitting(btn, true);
-  auth.isRegistering = true;
 
   if (!supabaseClient) {
-    registerError.textContent = 'Auth service not configured. Please set Supabase credentials in auth.js.';
+    registerError.textContent = 'Database service not configured. Please set Supabase credentials in auth.js.';
     setSubmitting(btn, false);
     return;
   }
 
-  const displayName = [firstName, lastName].filter(Boolean).join(' ') || email.split('@')[0];
-
-  const { data, error } = await supabaseClient.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        first_name: firstName,
-        last_name: lastName,
-        display_name: displayName,
-      },
-    },
-  });
+  // Insert into waitlist table
+  const { error } = await supabaseClient
+    .from('waitlist')
+    .insert([
+      { 
+        first_name: firstName, 
+        last_name: lastName, 
+        email: email,
+        features_wanted: featuresWanted 
+      }
+    ]);
 
   setSubmitting(btn, false);
 
   if (error) {
-    registerError.textContent = error.message;
+    // Handle specific unique constraint error
+    if (error.code === '23505' || error.message.includes('duplicate')) {
+      registerError.textContent = 'You are already on the waitlist with this email!';
+    } else {
+      registerError.textContent = error.message;
+    }
     return;
   }
 
-  // Supabase may require email confirmation natively
-  if (data.user && !data.user.confirmed_at && data.user.identities?.length === 0) {
-    registerError.textContent = 'An account with this email already exists.';
-    registerError.style.color = 'var(--red)';
-    return;
-  }
-
-  // Since you have a custom activation flow and don't want auto-login:
-  if (data.session) {
-    // Immediately sign them out so they don't bypass your custom activation
-    await supabaseClient.auth.signOut();
-  }
-
-  // Show a success message and keep them on the auth page
-  registerError.textContent = 'Account created successfully! Please follow your custom email instructions to activate.';
+  // Show a success message
+  registerError.textContent = 'Application received! We will notify you once selected for beta.';
   registerError.style.color = 'var(--green)';
-
-  // Optionally, you can clear the form fields here:
+  
+  // Clear the form fields
   document.getElementById('register-form').reset();
-
-  // Reset flag
-  auth.isRegistering = false;
 });
 
-// ── Google OAuth ──
-googleLoginBtn.addEventListener('click', async () => {
-  if (!supabaseClient) {
-    loginError.textContent = 'Auth service not configured. Please set Supabase credentials in auth.js.';
-    return;
-  }
-
-  const { error } = await supabaseClient.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: window.location.origin + window.location.pathname,
-    },
-  });
-
-  if (error) {
-    loginError.textContent = error.message;
-  }
-});
 
 // ── Logout ──
 logoutBtn.addEventListener('click', async () => {
