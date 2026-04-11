@@ -1,304 +1,350 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Bloomberg-inspired stock terminal with real-time TradingView data, technical analysis, and company fundamentals.">
+  <meta name="description"
+    content="Bloomberg-inspired stock terminal with real-time TradingView data, technical analysis, and company fundamentals.">
   <title>Terminal — Stock Analysis Dashboard</title>
   <link rel="stylesheet" href="styles.css">
   <!-- Favicon: orange square -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='12' fill='%23ff8c00'/><text y='70' x='10' font-size='48' font-family='monospace' font-weight='bold' fill='%230a0a0f'>TF</text></svg>">
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='12' fill='%23ff8c00'/><text y='70' x='10' font-size='48' font-family='monospace' font-weight='bold' fill='%230a0a0f'>TF</text></svg>">
 </head>
+
 <body>
 
-<!-- ══════════ WELCOME / AUTH PAGE ══════════ -->
-<div id="welcome-page" class="welcome-page">
-  <div class="welcome-bg">
-    <div class="welcome-grid"></div>
-    <div class="welcome-glow"></div>
+  <!-- ══════════ WELCOME / AUTH PAGE ══════════ -->
+  <div id="welcome-page" class="welcome-page">
+    <div class="welcome-bg">
+      <div class="welcome-grid"></div>
+      <div class="welcome-glow"></div>
+    </div>
+
+    <div class="welcome-container">
+      <!-- Left: Branding -->
+      <div class="welcome-hero">
+        <div class="welcome-logo">
+          <div class="welcome-logo__icon">TF</div>
+          <div>
+            <div class="welcome-logo__title">TERMINAL</div>
+          </div>
+        </div>
+        <h1 class="welcome-headline">Professional-grade<br>market intelligence.</h1>
+        <p class="welcome-tagline">
+          Real-time charts, financials, news, and watchlists — powered by
+          TradingView and yfinance. Free for registered users.
+        </p>
+        <div class="welcome-features">
+          <div class="welcome-feature">
+            <span class="welcome-feature__icon">&#9670;</span>
+            <span>Real-time charts &amp; technical analysis</span>
+          </div>
+          <div class="welcome-feature">
+            <span class="welcome-feature__icon">&#9670;</span>
+            <span>Company financials &amp; fundamentals</span>
+          </div>
+          <div class="welcome-feature">
+            <span class="welcome-feature__icon">&#9670;</span>
+            <span>Global exchange coverage (20+)</span>
+          </div>
+          <div class="welcome-feature">
+            <span class="welcome-feature__icon">&#9670;</span>
+            <span>Personalized watchlists</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Auth Forms -->
+      <div class="auth-card">
+        <div class="auth-card__header">
+          <button class="auth-tab auth-tab--active" data-auth-tab="login">Sign In</button>
+          <button class="auth-tab" data-auth-tab="waitlist">Apply for Beta</button>
+          <!-- To make Registration clickable again, remove style="pointer-events: none; opacity: 0.5; cursor: not-allowed;" -->
+          <button class="auth-tab" data-auth-tab="register"
+            style="pointer-events: none; opacity: 0.5; cursor: not-allowed;"
+            title="Registration temporarily disabled">Create Account</button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="login-form" class="auth-form" autocomplete="on">
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="login-email">Email</label>
+            <input class="auth-form__input" type="email" id="login-email" name="email" placeholder="you@example.com"
+              required autocomplete="email">
+          </div>
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="login-password">Password</label>
+            <input class="auth-form__input" type="password" id="login-password" name="password"
+              placeholder="Enter your password" required autocomplete="current-password">
+          </div>
+          <div class="auth-form__error" id="login-error"></div>
+          <button class="auth-btn auth-btn--primary" type="submit" id="login-submit">
+            <span class="auth-btn__text">Sign In</span>
+            <span class="auth-btn__loader" hidden></span>
+          </button>
+        </form>
+
+        <!-- Waitlist Form -->
+        <form id="waitlist-form" class="auth-form" style="display:none" autocomplete="off">
+          <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.4;">
+            Interest in the terminal is high! We are selecting beta testers based on their feature needs. Let us know
+            what Bloomberg functions or tools are most important to you.
+          </p>
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="waitlist-name">Name</label>
+            <input class="auth-form__input" type="text" id="waitlist-name" name="name" placeholder="Your Name" required>
+          </div>
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="waitlist-email">Email</label>
+            <input class="auth-form__input" type="email" id="waitlist-email" name="email" placeholder="you@example.com"
+              required>
+          </div>
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="waitlist-comments">Desired Features / Functions</label>
+            <textarea class="auth-form__input" id="waitlist-comments" name="comments" rows="4"
+              placeholder="e.g. Volume profile, Option chain visualization..." required
+              style="resize: vertical; min-height: 80px;"></textarea>
+          </div>
+          <div class="auth-form__error" id="waitlist-error"></div>
+          <div class="auth-form__success" id="waitlist-success"
+            style="color: var(--green); font-size: 0.85rem; margin-bottom: 1rem; display: none;"></div>
+          <button class="auth-btn auth-btn--primary" type="submit" id="waitlist-submit">
+            <span class="auth-btn__text">Apply for Beta</span>
+            <span class="auth-btn__loader" hidden></span>
+          </button>
+        </form>
+
+        <!-- Register Form -->
+        <form id="register-form" class="auth-form" style="display:none" autocomplete="on">
+          <div class="auth-form__row">
+            <div class="auth-form__group">
+              <label class="auth-form__label" for="register-first">First Name</label>
+              <input class="auth-form__input" type="text" id="register-first" name="first_name" placeholder="John"
+                autocomplete="given-name">
+            </div>
+            <div class="auth-form__group">
+              <label class="auth-form__label" for="register-last">Last Name</label>
+              <input class="auth-form__input" type="text" id="register-last" name="last_name" placeholder="Doe"
+                autocomplete="family-name">
+            </div>
+          </div>
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="register-email">Email</label>
+            <input class="auth-form__input" type="email" id="register-email" name="email" placeholder="you@example.com"
+              required autocomplete="email">
+          </div>
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="register-password">Password</label>
+            <input class="auth-form__input" type="password" id="register-password" name="password"
+              placeholder="Min. 8 characters" required minlength="8" autocomplete="new-password">
+          </div>
+          <div class="auth-form__error" id="register-error"></div>
+          <button class="auth-btn auth-btn--primary" type="submit" id="register-submit">
+            <span class="auth-btn__text">Create Account</span>
+            <span class="auth-btn__loader" hidden></span>
+          </button>
+        </form>
+
+        <!-- Divider -->
+        <!-- <div class="auth-divider"><span>or continue with</span></div> -->
+
+        <!-- Google OAuth -->
+        <!-- <button class="auth-btn auth-btn--google" id="google-login-btn">
+        <svg class="auth-btn__google-icon" viewBox="0 0 24 24" width="18" height="18">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Continue with Google
+      </button> -->
+
+        <p class="auth-card__footer">
+          By signing in, you agree to our Terms of Service and Privacy Policy.
+        </p>
+      </div>
+    </div>
+
+    <!-- Floating ticker decoration -->
+    <div class="welcome-tickers">
+      <span class="welcome-ticker welcome-ticker--green">AAPL +2.4%</span>
+      <span class="welcome-ticker welcome-ticker--red">TSLA -1.8%</span>
+      <span class="welcome-ticker welcome-ticker--green">NVDA +5.1%</span>
+      <span class="welcome-ticker welcome-ticker--red">META -0.6%</span>
+      <span class="welcome-ticker welcome-ticker--green">MSFT +1.2%</span>
+      <span class="welcome-ticker welcome-ticker--green">JPM +0.9%</span>
+    </div>
   </div>
 
-  <div class="welcome-container">
-    <!-- Left: Branding -->
-    <div class="welcome-hero">
-      <div class="welcome-logo">
-        <div class="welcome-logo__icon">TF</div>
+  <!-- ══════════ USER NAV (shown when logged in) ══════════ -->
+  <div id="user-nav" class="user-nav" style="display:none">
+    <span class="user-nav__name" id="user-display-name"></span>
+    <button class="user-nav__logout" id="logout-btn" title="Sign out">Sign Out</button>
+  </div>
+
+  <div id="app" style="display:none">
+
+    <!-- ══════════ HEADER BAR ══════════ -->
+    <header class="header" id="header">
+      <div class="header__brand">
+        <div class="header__logo">TF</div>
         <div>
-          <div class="welcome-logo__title">TERMINAL</div>
+          <div class="header__title">TERMINAL</div>
         </div>
       </div>
-      <h1 class="welcome-headline">Professional-grade<br>market intelligence.</h1>
-      <p class="welcome-tagline">
-        Real-time charts, financials, news, and watchlists — powered by
-        TradingView and yfinance. Free for registered users.
-      </p>
-      <div class="welcome-features">
-        <div class="welcome-feature">
-          <span class="welcome-feature__icon">&#9670;</span>
-          <span>Real-time charts &amp; technical analysis</span>
-        </div>
-        <div class="welcome-feature">
-          <span class="welcome-feature__icon">&#9670;</span>
-          <span>Company financials &amp; fundamentals</span>
-        </div>
-        <div class="welcome-feature">
-          <span class="welcome-feature__icon">&#9670;</span>
-          <span>Global exchange coverage (20+)</span>
-        </div>
-        <div class="welcome-feature">
-          <span class="welcome-feature__icon">&#9670;</span>
-          <span>Personalized watchlists</span>
-        </div>
+
+      <!-- Ticker Search -->
+      <div class="search-container">
+        <span class="search-container__icon">⌕</span>
+        <input type="text" id="ticker-input" class="search-container__input"
+          placeholder="Search company or ticker... (e.g. Toyota, AAPL)" autocomplete="off" spellcheck="false">
+        <span class="search-container__hint">
+          <span class="kbd">/</span> to search
+        </span>
+
+        <!-- Recent / Suggestions Dropdown -->
+        <div class="recent-dropdown" id="recent-dropdown"></div>
       </div>
+
+      <!-- Header Info -->
+      <div class="header__info">
+        <div class="live-dot"></div>
+        <span class="header__clock" id="header-clock">--:--:--</span>
+      </div>
+    </header>
+
+    <!-- ══════════ TICKER TAPE ══════════ -->
+    <div class="ticker-tape-bar" id="ticker-tape"></div>
+
+    <!-- ══════════ ACTIVE SYMBOL BAR ══════════ -->
+    <div class="symbol-bar" id="symbol-bar" style="display:none">
+      <input type="text" class="symbol-bar__ticker-input" id="symbol-ticker-input" value="AAPL" spellcheck="false"
+        autocomplete="off" title="Click or press Esc to change ticker">
+      <span class="symbol-bar__name" id="symbol-name">Apple Inc.</span>
+      <span class="symbol-bar__divider" id="symbol-divider"></span>
+      <span class="text-muted" style="font-size: 11px;" id="symbol-exchange">NASDAQ</span>
+      <!-- Function badge (shown when in a stock-specific function) -->
+      <span class="symbol-bar__fn-badge" id="symbol-fn-badge" style="display:none"></span>
     </div>
 
-    <!-- Right: Auth Forms -->
-    <div class="auth-card">
-      <div class="auth-card__header" style="flex-wrap: wrap; gap: 8px;">
-        <button class="auth-tab auth-tab--active" data-auth-tab="login">Sign In</button>
-        <button class="auth-tab" data-auth-tab="register">Create Account</button>
-        <button class="auth-tab" data-auth-tab="waitlist" style="flex-grow: 1;">Join Waitlist</button>
+    <!-- ══════════ NAV TABS (stock-context tabs, hidden on Home) ══════════ -->
+    <nav class="nav-tabs" id="nav-tabs" style="display:none">
+      <button class="nav-tabs__tab nav-tabs__tab--active" data-tab="overview">
+        <span class="kbd" style="margin-right:4px">1</span> Overview
+      </button>
+      <button class="nav-tabs__tab" data-tab="chart">
+        <span class="kbd" style="margin-right:4px">2</span> Chart
+      </button>
+      <button class="nav-tabs__tab" data-tab="news">
+        <span class="kbd" style="margin-right:4px">3</span> News
+      </button>
+      <button class="nav-tabs__tab" data-tab="financials">
+        <span class="kbd" style="margin-right:4px">4</span> Financials
+      </button>
+      <button class="nav-tabs__tab" data-tab="profile">
+        <span class="kbd" style="margin-right:4px">5</span> Profile
+      </button>
+      <button class="nav-tabs__tab" data-tab="watchlist">
+        <span class="kbd" style="margin-right:4px">6</span> Watchlist
+      </button>
+    </nav>
+
+    <!-- ══════════ MAIN DASHBOARD ══════════ -->
+    <main class="dashboard dashboard--overview" id="dashboard">
+      <!-- Content injected by app.js -->
+    </main>
+
+    <!-- ══════════ STATUS BAR ══════════ -->
+    <footer class="status-bar" id="status-bar">
+      <div class="status-bar__left">
+        <span class="status-bar__item" id="status-live">
+          <span class="live-dot" id="status-live-dot"></span>
+          <span id="status-live-label">LIVE</span>
+        </span>
+        <span class="status-bar__separator"></span>
+        <span class="status-bar__item" id="status-symbol">NASDAQ:AAPL</span>
+        <span class="status-bar__separator"></span>
+        <span class="status-bar__item" id="status-date">--</span>
       </div>
+      <div class="status-bar__right">
+        <span class="status-bar__item text-muted">
+          <span class="kbd">/</span> Search
+        </span>
+        <span class="status-bar__separator"></span>
+        <span class="status-bar__item text-muted">
+          <span class="kbd">Esc</span> Home
+        </span>
+        <span class="status-bar__separator"></span>
+        <span class="status-bar__item text-muted" id="status-datasource">Data: TradingView</span>
+      </div>
+    </footer>
 
-      <!-- Login Form -->
-      <form id="login-form" class="auth-form" autocomplete="on">
-        <div class="auth-form__group">
-          <label class="auth-form__label" for="login-email">Email</label>
-          <input class="auth-form__input" type="email" id="login-email" name="email" placeholder="you@example.com" required autocomplete="email">
-        </div>
-        <div class="auth-form__group">
-          <label class="auth-form__label" for="login-password">Password</label>
-          <input class="auth-form__input" type="password" id="login-password" name="password" placeholder="Enter your password" required autocomplete="current-password">
-        </div>
-        <div class="auth-form__error" id="login-error"></div>
-        <button class="auth-btn auth-btn--primary" type="submit" id="login-submit">
-          <span class="auth-btn__text">Sign In</span>
-          <span class="auth-btn__loader" hidden></span>
-        </button>
-      </form>
+  </div>
 
-      <!-- Register Form (Original code restored but disabled) -->
-      <form id="register-form" class="auth-form" style="display:none" autocomplete="on">
-        <div class="auth-form__row">
-          <div class="auth-form__group">
-            <label class="auth-form__label" for="register-first">First Name</label>
-            <input class="auth-form__input" type="text" id="register-first" name="first_name" placeholder="John" autocomplete="given-name">
-          </div>
-          <div class="auth-form__group">
-            <label class="auth-form__label" for="register-last">Last Name</label>
-            <input class="auth-form__input" type="text" id="register-last" name="last_name" placeholder="Doe" autocomplete="family-name">
+  <!-- ══════════ ARTICLE READER MODAL ══════════ -->
+  <div class="article-modal" id="article-modal">
+    <div class="article-modal__content">
+      <div class="article-modal__header">
+        <div class="article-modal__header-info">
+          <div class="article-modal__title" id="article-modal-title">Article</div>
+          <div class="article-modal__meta">
+            <span class="article-modal__publisher" id="article-modal-publisher"></span>
+            <span>·</span>
+            <span id="article-modal-date"></span>
           </div>
         </div>
-        <div class="auth-form__group">
-          <label class="auth-form__label" for="register-email">Email</label>
-          <input class="auth-form__input" type="email" id="register-email" name="email" placeholder="you@example.com" required autocomplete="email">
-        </div>
-        <div class="auth-form__group">
-          <label class="auth-form__label" for="register-password">Password</label>
-          <input class="auth-form__input" type="password" id="register-password" name="password" placeholder="Min. 8 characters" required minlength="8" autocomplete="new-password">
-        </div>
-        <div class="auth-form__error" id="register-error"></div>
-        <button class="auth-btn auth-btn--primary" type="submit" id="register-submit" disabled style="opacity: 0.5; cursor: not-allowed;" title="Registration is currently closed">
-          <span class="auth-btn__text">Registration Disabled - Join Waitlist</span>
-          <span class="auth-btn__loader" hidden></span>
-        </button>
-      </form>
-
-      <!-- Waitlist Form -->
-      <form id="waitlist-form" class="auth-form" style="display:none" autocomplete="on">
-        <div class="auth-form__row">
-          <div class="auth-form__group">
-            <label class="auth-form__label" for="waitlist-first">First Name</label>
-            <input class="auth-form__input" type="text" id="waitlist-first" name="first_name" placeholder="John" autocomplete="given-name">
-          </div>
-          <div class="auth-form__group">
-            <label class="auth-form__label" for="waitlist-last">Last Name</label>
-            <input class="auth-form__input" type="text" id="waitlist-last" name="last_name" placeholder="Doe" autocomplete="family-name">
-          </div>
-        </div>
-        <div class="auth-form__group">
-          <label class="auth-form__label" for="waitlist-email">Email</label>
-          <input class="auth-form__input" type="email" id="waitlist-email" name="email" placeholder="you@example.com" required autocomplete="email">
-        </div>
-        <div class="auth-form__group">
-          <label class="auth-form__label" for="waitlist-features">What features/functions would you like to see?</label>
-          <textarea class="auth-form__input" id="waitlist-features" name="features_wanted" placeholder="E.g., specific Bloomberg functions, macro data, etc." required rows="3" style="resize: vertical;"></textarea>
-        </div>
-        <div class="auth-form__error" id="waitlist-error"></div>
-        <button class="auth-btn auth-btn--primary" type="submit" id="waitlist-submit">
-          <span class="auth-btn__text">Apply for Beta</span>
-          <span class="auth-btn__loader" hidden></span>
-        </button>
-      </form>
-
-
-
-      <p class="auth-card__footer">
-        By signing in, you agree to our Terms of Service and Privacy Policy.
-      </p>
+        <button class="article-modal__close" onclick="closeArticleModal()" title="Close (Esc)">✕</button>
+      </div>
+      <div class="article-modal__body" id="article-modal-body">
+        <!-- Article content loaded dynamically -->
+      </div>
+      <div class="article-modal__footer">
+        <a href="#" id="article-modal-link" target="_blank" class="article-modal__link">
+          Open original article →
+        </a>
+        <span class="article-modal__esc-hint">
+          <span class="kbd">Esc</span> to close
+        </span>
+      </div>
     </div>
   </div>
 
-  <!-- Floating ticker decoration -->
-  <div class="welcome-tickers">
-    <span class="welcome-ticker welcome-ticker--green">AAPL +2.4%</span>
-    <span class="welcome-ticker welcome-ticker--red">TSLA -1.8%</span>
-    <span class="welcome-ticker welcome-ticker--green">NVDA +5.1%</span>
-    <span class="welcome-ticker welcome-ticker--red">META -0.6%</span>
-    <span class="welcome-ticker welcome-ticker--green">MSFT +1.2%</span>
-    <span class="welcome-ticker welcome-ticker--green">JPM +0.9%</span>
-  </div>
-</div>
-
-<!-- ══════════ USER NAV (shown when logged in) ══════════ -->
-<div id="user-nav" class="user-nav" style="display:none">
-  <span class="user-nav__name" id="user-display-name"></span>
-  <button class="user-nav__logout" id="logout-btn" title="Sign out">Sign Out</button>
-</div>
-
-<div id="app" style="display:none">
-
-  <!-- ══════════ HEADER BAR ══════════ -->
-  <header class="header" id="header">
-    <div class="header__brand">
-      <div class="header__logo">TF</div>
-      <div>
-        <div class="header__title">TERMINAL</div>
-      </div>
-    </div>
-
-    <!-- Ticker Search -->
-    <div class="search-container">
-      <span class="search-container__icon">⌕</span>
-      <input
-        type="text"
-        id="ticker-input"
-        class="search-container__input"
-      placeholder="Search company or ticker... (e.g. Toyota, AAPL)"
-        autocomplete="off"
-        spellcheck="false"
-      >
-      <span class="search-container__hint">
-        <span class="kbd">/</span> to search
-      </span>
-
-      <!-- Recent / Suggestions Dropdown -->
-      <div class="recent-dropdown" id="recent-dropdown"></div>
-    </div>
-
-    <!-- Header Info -->
-    <div class="header__info">
-      <div class="live-dot"></div>
-      <span class="header__clock" id="header-clock">--:--:--</span>
-    </div>
-  </header>
-
-  <!-- ══════════ TICKER TAPE ══════════ -->
-  <div class="ticker-tape-bar" id="ticker-tape"></div>
-
-  <!-- ══════════ ACTIVE SYMBOL BAR ══════════ -->
-  <div class="symbol-bar" id="symbol-bar" style="display:none">
-    <input type="text"
-           class="symbol-bar__ticker-input"
-           id="symbol-ticker-input"
-           value="AAPL"
-           spellcheck="false"
-           autocomplete="off"
-           title="Click or press Esc to change ticker">
-    <span class="symbol-bar__name" id="symbol-name">Apple Inc.</span>
-    <span class="symbol-bar__divider" id="symbol-divider"></span>
-    <span class="text-muted" style="font-size: 11px;" id="symbol-exchange">NASDAQ</span>
-    <!-- Function badge (shown when in a stock-specific function) -->
-    <span class="symbol-bar__fn-badge" id="symbol-fn-badge" style="display:none"></span>
-  </div>
-
-  <!-- ══════════ NAV TABS (stock-context tabs, hidden on Home) ══════════ -->
-  <nav class="nav-tabs" id="nav-tabs" style="display:none">
-    <button class="nav-tabs__tab nav-tabs__tab--active" data-tab="overview">
-      <span class="kbd" style="margin-right:4px">1</span> Overview
-    </button>
-    <button class="nav-tabs__tab" data-tab="chart">
-      <span class="kbd" style="margin-right:4px">2</span> Chart
-    </button>
-    <button class="nav-tabs__tab" data-tab="news">
-      <span class="kbd" style="margin-right:4px">3</span> News
-    </button>
-    <button class="nav-tabs__tab" data-tab="financials">
-      <span class="kbd" style="margin-right:4px">4</span> Financials
-    </button>
-    <button class="nav-tabs__tab" data-tab="profile">
-      <span class="kbd" style="margin-right:4px">5</span> Profile
-    </button>
-    <button class="nav-tabs__tab" data-tab="watchlist">
-      <span class="kbd" style="margin-right:4px">6</span> Watchlist
-    </button>
-  </nav>
-
-  <!-- ══════════ MAIN DASHBOARD ══════════ -->
-  <main class="dashboard dashboard--overview" id="dashboard">
-    <!-- Content injected by app.js -->
-  </main>
-
-  <!-- ══════════ STATUS BAR ══════════ -->
-  <footer class="status-bar" id="status-bar">
-    <div class="status-bar__left">
-      <span class="status-bar__item" id="status-live">
-        <span class="live-dot" id="status-live-dot"></span>
-        <span id="status-live-label">LIVE</span>
-      </span>
-      <span class="status-bar__separator"></span>
-      <span class="status-bar__item" id="status-symbol">NASDAQ:AAPL</span>
-      <span class="status-bar__separator"></span>
-      <span class="status-bar__item" id="status-date">--</span>
-    </div>
-    <div class="status-bar__right">
-      <span class="status-bar__item text-muted">
-        <span class="kbd">/</span> Search
-      </span>
-      <span class="status-bar__separator"></span>
-      <span class="status-bar__item text-muted">
-        <span class="kbd">Esc</span> Home
-      </span>
-      <span class="status-bar__separator"></span>
-      <span class="status-bar__item text-muted" id="status-datasource">Data: TradingView</span>
-    </div>
-  </footer>
-
-</div>
-
-<!-- ══════════ ARTICLE READER MODAL ══════════ -->
-<div class="article-modal" id="article-modal">
-  <div class="article-modal__content">
-    <div class="article-modal__header">
-      <div class="article-modal__header-info">
-        <div class="article-modal__title" id="article-modal-title">Article</div>
-        <div class="article-modal__meta">
-          <span class="article-modal__publisher" id="article-modal-publisher"></span>
-          <span>·</span>
-          <span id="article-modal-date"></span>
+  <!-- ══════════ SET PASSWORD MODAL (INVITES) ══════════ -->
+  <div class="article-modal" id="password-modal" style="display:none; z-index: 10000; background: rgba(10,10,15,0.95);">
+    <div class="article-modal__content" style="max-width: 400px; top: 50%; left: 50%; transform: translate(-50%, -50%); position: absolute; height: auto;">
+      <div class="article-modal__header">
+        <div class="article-modal__header-info">
+          <div class="article-modal__title">Welcome to Terminal!</div>
         </div>
       </div>
-      <button class="article-modal__close" onclick="closeArticleModal()" title="Close (Esc)">✕</button>
-    </div>
-    <div class="article-modal__body" id="article-modal-body">
-      <!-- Article content loaded dynamically -->
-    </div>
-    <div class="article-modal__footer">
-      <a href="#" id="article-modal-link" target="_blank" class="article-modal__link">
-        Open original article →
-      </a>
-      <span class="article-modal__esc-hint">
-        <span class="kbd">Esc</span> to close
-      </span>
+      <div class="article-modal__body" style="padding: 24px;">
+        <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 0.95rem; line-height: 1.5;">
+          Your account is almost ready. Please set a password to securely access your terminal features.
+        </p>
+        <form id="set-password-form" class="auth-form" autocomplete="off">
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="new-password">New Password</label>
+            <input class="auth-form__input" type="password" id="new-password" name="password" placeholder="Min. 8 characters" required minlength="8">
+          </div>
+          <div class="auth-form__error" id="set-password-error"></div>
+          <div class="auth-form__success" id="set-password-success" style="color: var(--green); font-size: 0.85rem; margin-bottom: 1rem; display: none;"></div>
+          <button class="auth-btn auth-btn--primary" type="submit" id="set-password-submit" style="width: 100%;">
+            <span class="auth-btn__text">Save Password</span>
+            <span class="auth-btn__loader" hidden></span>
+          </button>
+        </form>
+      </div>
     </div>
   </div>
-</div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="auth.js"></script>
-<script src="app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="auth.js"></script>
+  <script src="app.js"></script>
 
 </body>
+
 </html>

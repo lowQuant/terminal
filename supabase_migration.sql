@@ -221,21 +221,37 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+    w_name TEXT;
+    auto_activate BOOLEAN := FALSE;
 BEGIN
-    INSERT INTO public.profiles (id, email, first_name, last_name, display_name)
+    -- Check if the new user's email corresponds to an approved waitlist candidate
+    SELECT name INTO w_name FROM public.waitlist WHERE email = NEW.email LIMIT 1;
+
+    -- If they are on the waitlist, auto-activate their profile and remove them from the waitlist
+    IF w_name IS NOT NULL THEN
+        auto_activate := TRUE;
+        DELETE FROM public.waitlist WHERE email = NEW.email;
+    END IF;
+
+    -- Note: If you want ALL invited users to be active regardless of waitlist, change auto_activate to TRUE unconditionally.
+
+    INSERT INTO public.profiles (id, email, first_name, last_name, display_name, is_active)
     VALUES (
         NEW.id,
         NEW.email,
-        COALESCE(NEW.raw_user_meta_data ->> 'first_name', ''),
-        COALESCE(NEW.raw_user_meta_data ->> 'last_name', ''),
+        COALESCE(NEW.raw_user_meta_data ->> 'first_name', split_part(w_name, ' ', 1), ''),
+        COALESCE(NEW.raw_user_meta_data ->> 'last_name', NULLIF(substring(w_name from position(' ' in w_name) + 1), w_name), ''),
         COALESCE(
             NEW.raw_user_meta_data ->> 'display_name',
-            TRIM(
+            w_name,
+            NULLIF(TRIM(
                 COALESCE(NEW.raw_user_meta_data ->> 'first_name', '') || ' ' ||
                 COALESCE(NEW.raw_user_meta_data ->> 'last_name', '')
-            ),
+            ), ''),
             split_part(NEW.email, '@', 1)   -- fallback: use email prefix
-        )
+        ),
+        auto_activate -- Will be TRUE if they were found on the waitlist
     );
 
     -- Also create a default watchlist for the new user
@@ -310,3 +326,28 @@ SELECT
 FROM public.profiles p
 LEFT JOIN public.activity_log a ON a.user_id = p.id
 GROUP BY p.id, p.email, p.display_name, p.subscription_tier, p.created_at;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- WAITLIST
+-- Stores applications for beta testing
+-- ═══════════════════════════════════════════════════════════════
+
+CREATE TABLE public.waitlist (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  comments TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Row Level Security
+ALTER TABLE public.waitlist ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow anonymous inserts" ON public.waitlist 
+FOR INSERT 
+WITH CHECK (true);
+
+CREATE POLICY "Allow read access for authenticated users only" ON public.waitlist
+FOR SELECT 
+USING (auth.role() = 'authenticated');

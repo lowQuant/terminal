@@ -25,6 +25,12 @@ const auth = {
   isRegistering: false, // Prevents terminal flash during custom signup flow
 };
 
+// Check for invite or recovery links before Supabase strips the hash
+let isInviteOrRecovery = false;
+if (window.location.hash.includes('type=invite') || window.location.hash.includes('type=recovery')) {
+  isInviteOrRecovery = true;
+}
+
 // ── DOM References ──
 const welcomePage = document.getElementById('welcome-page');
 const appContainer = document.getElementById('app');
@@ -36,6 +42,8 @@ const waitlistForm = document.getElementById('waitlist-form');
 const loginError = document.getElementById('login-error');
 const registerError = document.getElementById('register-error');
 const waitlistError = document.getElementById('waitlist-error');
+const waitlistSuccess = document.getElementById('waitlist-success');
+const googleLoginBtn = document.getElementById('google-login-btn');
 const logoutBtn = document.getElementById('logout-btn');
 
 // ── Auth Tab Switching ──
@@ -45,23 +53,25 @@ document.querySelectorAll('[data-auth-tab]').forEach(tab => {
     document.querySelectorAll('[data-auth-tab]').forEach(t => t.classList.remove('auth-tab--active'));
     tab.classList.add('auth-tab--active');
 
+    loginForm.style.display = 'none';
+    registerForm.style.display = 'none';
+    if (waitlistForm) waitlistForm.style.display = 'none';
+
     if (target === 'login') {
       loginForm.style.display = '';
-      registerForm.style.display = 'none';
-      waitlistForm.style.display = 'none';
     } else if (target === 'register') {
-      loginForm.style.display = 'none';
       registerForm.style.display = '';
-      waitlistForm.style.display = 'none';
     } else if (target === 'waitlist') {
-      loginForm.style.display = 'none';
-      registerForm.style.display = 'none';
-      waitlistForm.style.display = '';
+      if (waitlistForm) waitlistForm.style.display = '';
     }
+
     // Clear errors on tab switch
     loginError.textContent = '';
     registerError.textContent = '';
-    waitlistError.textContent = '';
+    if (waitlistError) {
+      waitlistError.textContent = '';
+      if (waitlistSuccess) waitlistSuccess.style.display = 'none';
+    }
   });
 });
 
@@ -161,7 +171,7 @@ loginForm.addEventListener('submit', async (e) => {
   processLogin(data.user);
 });
 
-// ── Email/Password Registration (Kept for Automation, Disabled in UI) ──
+// ── Email/Password Registration ──
 registerForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   registerError.textContent = '';
@@ -211,74 +221,98 @@ registerForm.addEventListener('submit', async (e) => {
     return;
   }
 
+  // Supabase may require email confirmation natively
   if (data.user && !data.user.confirmed_at && data.user.identities?.length === 0) {
     registerError.textContent = 'An account with this email already exists.';
     registerError.style.color = 'var(--red)';
     return;
   }
 
+  // Since you have a custom activation flow and don't want auto-login:
   if (data.session) {
+    // Immediately sign them out so they don't bypass your custom activation
     await supabaseClient.auth.signOut();
   }
 
+  // Show a success message and keep them on the auth page
   registerError.textContent = 'Account created successfully! Please follow your custom email instructions to activate.';
   registerError.style.color = 'var(--green)';
 
+  // Optionally, you can clear the form fields here:
   document.getElementById('register-form').reset();
+
+  // Reset flag
   auth.isRegistering = false;
 });
 
-// ── Waitlist Application ──
-waitlistForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  waitlistError.textContent = '';
-  const firstName = document.getElementById('waitlist-first').value.trim();
-  const lastName = document.getElementById('waitlist-last').value.trim();
-  const email = document.getElementById('waitlist-email').value.trim();
-  const featuresWanted = document.getElementById('waitlist-features').value.trim();
-  const btn = document.getElementById('waitlist-submit');
-
-  if (!email || !featuresWanted) {
-    waitlistError.textContent = 'Email and requested features are required.';
-    return;
-  }
-
-  setSubmitting(btn, true);
-
+// ── Google OAuth (Currently Disabled) ──
+/*
+googleLoginBtn.addEventListener('click', async () => {
   if (!supabaseClient) {
-    waitlistError.textContent = 'Database service not configured. Please set Supabase credentials in auth.js.';
-    setSubmitting(btn, false);
+    loginError.textContent = 'Auth service not configured. Please set Supabase credentials in auth.js.';
     return;
   }
 
-  const { error } = await supabaseClient
-    .from('waitlist')
-    .insert([
-      { 
-        first_name: firstName, 
-        last_name: lastName, 
-        email: email,
-        features_wanted: featuresWanted 
-      }
-    ]);
-
-  setSubmitting(btn, false);
+  const { error } = await supabaseClient.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin + window.location.pathname,
+    },
+  });
 
   if (error) {
-    if (error.code === '23505' || error.message.includes('duplicate')) {
-      waitlistError.textContent = 'You are already on the waitlist with this email!';
-    } else {
-      waitlistError.textContent = error.message;
-    }
-    return;
+    loginError.textContent = error.message;
   }
-
-  waitlistError.textContent = 'Application received! We will notify you once selected for beta.';
-  waitlistError.style.color = 'var(--green)';
-  
-  document.getElementById('waitlist-form').reset();
 });
+*/
 
+// ── Waitlist Application ──
+if (waitlistForm) {
+  waitlistForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    waitlistError.textContent = '';
+    waitlistSuccess.style.display = 'none';
+    
+    const name = document.getElementById('waitlist-name').value.trim();
+    const email = document.getElementById('waitlist-email').value.trim();
+    const comments = document.getElementById('waitlist-comments').value.trim();
+    const btn = document.getElementById('waitlist-submit');
+
+    if (!name || !email || !comments) {
+      waitlistError.textContent = 'Please fill in all fields.';
+      return;
+    }
+
+    setSubmitting(btn, true);
+
+    if (!supabaseClient) {
+      waitlistError.textContent = 'Service not configured. Please try again later.';
+      setSubmitting(btn, false);
+      return;
+    }
+
+    const { error } = await supabaseClient
+      .from('waitlist')
+      .insert([
+        { name, email, comments }
+      ]);
+
+    setSubmitting(btn, false);
+
+    if (error) {
+      if (error.code === '23505') {
+        waitlistError.textContent = 'You are already on the waitlist!';
+      } else {
+        waitlistError.textContent = error.message;
+      }
+      return;
+    }
+
+    waitlistSuccess.textContent = 'Application submitted! We will carefully review your feature requests and get back to you soon.';
+    waitlistSuccess.style.display = 'block';
+    waitlistForm.reset();
+  });
+}
 
 // ── Logout ──
 logoutBtn.addEventListener('click', async () => {
@@ -303,11 +337,57 @@ async function initAuth() {
 
     if (session?.user) {
       auth.session = session;
+      
+      // If user came via an invite link, prompt them to set their password
+      if (isInviteOrRecovery || event === 'PASSWORD_RECOVERY') {
+        const pwdModal = document.getElementById('password-modal');
+        if (pwdModal) pwdModal.style.display = 'block';
+        isInviteOrRecovery = false; // Prevent showing again unnecessarily
+      }
+
       processLogin(session.user);
     } else if (event === 'SIGNED_OUT') {
       showWelcome();
     }
   });
+
+  // Handle set-password form for invitees
+  const setPasswordForm = document.getElementById('set-password-form');
+  if (setPasswordForm) {
+    setPasswordForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('set-password-submit');
+      const pwd = document.getElementById('new-password').value;
+      const err = document.getElementById('set-password-error');
+      const succ = document.getElementById('set-password-success');
+
+      err.textContent = '';
+      succ.style.display = 'none';
+
+      if (pwd.length < 8) {
+        err.textContent = 'Password must be at least 8 characters.';
+        return;
+      }
+
+      setSubmitting(btn, true);
+
+      // Updates the password for the currently logged-in active session
+      const { error } = await supabaseClient.auth.updateUser({ password: pwd });
+      
+      setSubmitting(btn, false);
+
+      if (error) {
+        err.textContent = error.message;
+      } else {
+        succ.textContent = 'Password successfully set! You can safely close this.';
+        succ.style.display = 'block';
+        // Hide the modal shortly after success
+        setTimeout(() => {
+          document.getElementById('password-modal').style.display = 'none';
+        }, 2000);
+      }
+    });
+  }
 
   // Check for existing session
   const { data: { session } } = await supabaseClient.auth.getSession();
