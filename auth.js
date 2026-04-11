@@ -79,21 +79,30 @@ async function processLogin(user) {
   if (supabaseClient) {
     const { data: profile } = await supabaseClient
       .from('profiles')
-      .select('is_active')
+      .select('is_active, llm_keys')
       .eq('id', user.id)
       .single();
 
-    if (profile && profile.is_active === false) {
-      // Force sign-out if account is deactivated or pending
-      await supabaseClient.auth.signOut();
-      
-      const loginError = document.getElementById('login-error');
-      if (loginError && !auth.isRegistering) {
-        loginError.textContent = 'Account disabled or pending activation. Please verify your email.';
-        loginError.style.color = 'var(--red)';
+    if (profile) {
+      if (profile.is_active === false) {
+        // Force sign-out if account is deactivated or pending
+        await supabaseClient.auth.signOut();
+        const loginError = document.getElementById('login-error');
+        if (loginError && !auth.isRegistering) {
+          loginError.textContent = 'Account disabled or pending activation. Please verify your email.';
+          loginError.style.color = 'var(--red)';
+        }
+        showWelcome();
+        return; // Do not render terminal
       }
-      showWelcome();
-      return; // Do not render terminal
+      
+      // Store LLM Keys for the session
+      window.User = window.User || {};
+      window.User.llm_keys = profile.llm_keys || {};
+      // If the WF hub is already rendered, refresh its agent chip
+      if (typeof window.wfUpdateAgentLabel === 'function') {
+        window.wfUpdateAgentLabel();
+      }
     }
   }
 
@@ -403,3 +412,287 @@ async function initAuth() {
 
 // Initialize auth immediately
 initAuth();
+
+// ═══════════════════════════════════════════════════════════════════
+// USER SETTINGS — LLM provider selection, keys, model dropdowns
+//
+// Two-level selection: the user picks a Primary Provider, then picks
+// a Model from that provider. The Model control is a <select> for the
+// fixed providers (Anthropic/OpenAI/Gemini/Perplexity) and a searchable
+// <input list=datalist> for OpenRouter, because OpenRouter has 400+
+// models that would drown a plain dropdown.
+//
+// OpenRouter models are fetched once (cached server-side for 10 min)
+// from /api/wf/openrouter/models — the endpoint normalizes OpenRouter's
+// schema into {id, name, context_length, pricing, supports_tools}.
+//
+// The stored shape of `profiles.llm_keys` is:
+//   {
+//     provider:    "openrouter",
+//     agent_model: "anthropic/claude-3.5-sonnet",
+//     anthropic: "sk-ant-...", openai: "sk-...", ...
+//   }
+// ═══════════════════════════════════════════════════════════════════
+
+// Curated default model lists for each fixed provider.
+// These are hints — users can still paste any model ID via the raw
+// text input (OpenRouter's searchable field also accepts free-form).
+const SETTINGS_PROVIDER_MODELS = {
+  anthropic: [
+    { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' },
+    { id: 'claude-3-5-haiku-20241022',  name: 'Claude 3.5 Haiku' },
+    { id: 'claude-3-opus-20240229',     name: 'Claude 3 Opus' },
+    { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
+    { id: 'claude-opus-4-5-20250929',   name: 'Claude Opus 4.5' },
+  ],
+  openai: [
+    { id: 'gpt-4o',             name: 'GPT-4o' },
+    { id: 'gpt-4o-mini',        name: 'GPT-4o Mini' },
+    { id: 'gpt-4-turbo',        name: 'GPT-4 Turbo' },
+    { id: 'o1-preview',         name: 'o1 (reasoning preview)' },
+    { id: 'o1-mini',            name: 'o1 Mini' },
+  ],
+  gemini: [
+    { id: 'gemini-2.5-pro',     name: 'Gemini 2.5 Pro' },
+    { id: 'gemini-2.5-flash',   name: 'Gemini 2.5 Flash' },
+    { id: 'gemini-1.5-pro',     name: 'Gemini 1.5 Pro' },
+    { id: 'gemini-1.5-flash',   name: 'Gemini 1.5 Flash' },
+  ],
+  perplexity: [
+    { id: 'sonar-pro',          name: 'Sonar Pro (web search + reasoning)' },
+    { id: 'sonar',              name: 'Sonar (web search)' },
+    { id: 'sonar-reasoning',    name: 'Sonar Reasoning' },
+  ],
+  openrouter: [],  // populated dynamically from /api/wf/openrouter/models
+};
+
+// In-memory cache of the normalized OpenRouter list — avoids a refetch
+// every time the user flips the provider dropdown within one session.
+let _openrouterModelsCache = null;
+
+const settingsForm = document.getElementById('settings-form');
+if (settingsForm) {
+  const providerSel = document.getElementById('settings-provider');
+  const modelSel    = document.getElementById('settings-agent-model');
+  const orInput     = document.getElementById('settings-openrouter-model');
+  const orList      = document.getElementById('openrouter-models-datalist');
+  const orWrap      = document.getElementById('settings-openrouter-wrap');
+  const stdWrap     = document.getElementById('settings-model-wrap');
+  const modelHint   = document.getElementById('settings-model-hint');
+  const orInfo      = document.getElementById('settings-openrouter-info');
+
+  // ── Populate the key-status chips (● set / ○ not set) ──
+  function updateKeyStatuses() {
+    const providers = ['anthropic', 'openai', 'gemini', 'perplexity', 'openrouter'];
+    providers.forEach((p) => {
+      const input = document.getElementById(`key-${p}`);
+      const dot   = document.getElementById(`status-${p}`);
+      if (!dot || !input) return;
+      const has = input.value.trim().length > 0;
+      dot.textContent = has ? '● set' : '○ not set';
+      dot.className = 'key-status ' + (has ? 'key-status--set' : 'key-status--unset');
+    });
+  }
+
+  // Refresh chip state whenever a key input changes
+  ['anthropic', 'openai', 'gemini', 'perplexity', 'openrouter'].forEach((p) => {
+    const input = document.getElementById(`key-${p}`);
+    if (input) input.addEventListener('input', updateKeyStatuses);
+  });
+
+  // ── Render model options for a given provider ──
+  function renderModelsForProvider(provider, preselectModel) {
+    const isOpenRouter = provider === 'openrouter';
+    stdWrap.style.display = isOpenRouter ? 'none' : '';
+    orWrap.style.display  = isOpenRouter ? '' : 'none';
+
+    if (!isOpenRouter) {
+      const models = SETTINGS_PROVIDER_MODELS[provider] || [];
+      modelSel.innerHTML = models.map((m) =>
+        `<option value="${m.id}">${m.name}</option>`
+      ).join('');
+      if (preselectModel) modelSel.value = preselectModel;
+      modelHint.textContent = `${models.length} curated models`;
+      return;
+    }
+
+    // OpenRouter: fetch once, render as <datalist> options for search
+    if (preselectModel) orInput.value = preselectModel;
+    modelHint.textContent = 'Type to search — 400+ models from all providers';
+    fetchOpenRouterModels().then((models) => {
+      orList.innerHTML = models.map((m) => {
+        const pp = m.pricing_prompt ? `$${(+m.pricing_prompt * 1e6).toFixed(2)}/Mtok` : '';
+        const ctx = m.context_length ? ` · ${Math.round(m.context_length / 1000)}k` : '';
+        const tools = m.supports_tools ? ' · tools' : '';
+        const label = `${m.name}${ctx}${tools}${pp ? ' · ' + pp : ''}`;
+        return `<option value="${m.id}" label="${label.replace(/"/g, '&quot;')}">${label}</option>`;
+      }).join('');
+      orInfo.textContent = `${models.length} models available · pricing shown per 1M input tokens`;
+
+      // Show details when the user picks/types a specific model
+      orInput.addEventListener('input', () => {
+        const m = models.find((x) => x.id === orInput.value);
+        if (m) {
+          const pp = m.pricing_prompt ? ` · $${(+m.pricing_prompt * 1e6).toFixed(2)}/Mtok in` : '';
+          const pc = m.pricing_completion ? ` · $${(+m.pricing_completion * 1e6).toFixed(2)}/Mtok out` : '';
+          const ctx = m.context_length ? ` · ${Math.round(m.context_length / 1000)}k ctx` : '';
+          const t = m.supports_tools ? ' · tools ✓' : ' · no tools';
+          orInfo.textContent = (m.name || m.id) + ctx + t + pp + pc;
+        }
+      }, { once: false });
+    }).catch((err) => {
+      orInfo.textContent = 'Could not load OpenRouter models: ' + err.message;
+    });
+  }
+
+  async function fetchOpenRouterModels() {
+    if (_openrouterModelsCache) return _openrouterModelsCache;
+    const res = await fetch('/api/wf/openrouter/models');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    _openrouterModelsCache = data.models || [];
+    return _openrouterModelsCache;
+  }
+
+  // Swap model list whenever the provider changes
+  providerSel.addEventListener('change', () => {
+    renderModelsForProvider(providerSel.value, null);
+  });
+
+  // ── Open/close the settings modal ──
+  //
+  // The shared .article-modal CSS hides the modal with
+  // ``opacity: 0; pointer-events: none;`` and reveals it via the
+  // ``.article-modal--visible`` class. Toggling ``style.display``
+  // alone does nothing because the CSS opacity rule still applies.
+  const settingsModal = document.getElementById('settings-modal');
+
+  function openSettingsModal() {
+    settingsModal.classList.add('article-modal--visible');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeSettingsModal() {
+    settingsModal.classList.remove('article-modal--visible');
+    document.body.style.overflow = '';
+  }
+
+  // Close handlers: X button, click on backdrop, Esc
+  document.getElementById('settings-close-btn')?.addEventListener('click', closeSettingsModal);
+  settingsModal?.addEventListener('click', (e) => {
+    if (e.target === settingsModal) closeSettingsModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && settingsModal.classList.contains('article-modal--visible')) {
+      closeSettingsModal();
+    }
+  });
+
+  // Open the modal — load keys, render provider + model
+  document.getElementById('settings-btn')?.addEventListener('click', async () => {
+    openSettingsModal();
+    document.getElementById('settings-success').style.display = 'none';
+    document.getElementById('settings-error').style.display = 'none';
+    if (!supabaseClient || !auth.user) return;
+
+    const { data: profile, error } = await supabaseClient
+      .from('profiles')
+      .select('llm_keys')
+      .eq('id', auth.user.id)
+      .single();
+
+    if (error) {
+      console.warn('[settings] profile load failed:', error);
+      return;
+    }
+
+    const keys = (profile && profile.llm_keys) || {};
+    // Key fields
+    document.getElementById('key-anthropic').value  = keys.anthropic  || '';
+    document.getElementById('key-openai').value     = keys.openai     || '';
+    document.getElementById('key-gemini').value     = keys.gemini     || '';
+    document.getElementById('key-perplexity').value = keys.perplexity || '';
+    document.getElementById('key-openrouter').value = keys.openrouter || '';
+    updateKeyStatuses();
+
+    // Provider + model selection
+    const provider = keys.provider || inferProviderFromModel(keys.agent_model) || 'anthropic';
+    providerSel.value = provider;
+    renderModelsForProvider(provider, keys.agent_model);
+
+    window.User = window.User || {};
+    window.User.llm_keys = keys;
+  });
+
+  // Cheap fallback for old profiles missing the `provider` field
+  function inferProviderFromModel(model) {
+    if (!model) return null;
+    const m = String(model).toLowerCase();
+    if (m.startsWith('openrouter/')) return 'openrouter';
+    if (m.startsWith('gemini/') || m.includes('gemini')) return 'gemini';
+    if (m.includes('sonar') || m.includes('perplexity')) return 'perplexity';
+    if (m.includes('claude')) return 'anthropic';
+    if (m.includes('gpt') || m.startsWith('o1')) return 'openai';
+    return null;
+  }
+
+  // ── Save ──
+  settingsForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn  = document.getElementById('settings-submit');
+    const succ = document.getElementById('settings-success');
+    const err  = document.getElementById('settings-error');
+    succ.style.display = 'none';
+    err.style.display  = 'none';
+
+    if (!supabaseClient || !auth.user) return;
+    setSubmitting(btn, true);
+
+    const provider = providerSel.value;
+    const agent_model =
+      provider === 'openrouter'
+        ? (orInput.value.trim() || 'anthropic/claude-3.5-sonnet')
+        : modelSel.value;
+
+    const keys = {
+      provider,
+      agent_model,
+      anthropic:  document.getElementById('key-anthropic').value.trim(),
+      openai:     document.getElementById('key-openai').value.trim(),
+      gemini:     document.getElementById('key-gemini').value.trim(),
+      perplexity: document.getElementById('key-perplexity').value.trim(),
+      openrouter: document.getElementById('key-openrouter').value.trim(),
+    };
+
+    // Sanity: warn (don't block) if the selected provider has no key
+    const selectedKey = keys[provider];
+    if (!selectedKey) {
+      err.textContent = `No ${provider} API key set. The primary provider will fail until you add one.`;
+      err.style.color = 'var(--orange, #ff8c00)';
+      err.style.display = 'block';
+    }
+
+    const { error: saveErr } = await supabaseClient
+      .from('profiles')
+      .update({ llm_keys: keys })
+      .eq('id', auth.user.id);
+
+    setSubmitting(btn, false);
+
+    if (saveErr) {
+      err.textContent = 'Save failed: ' + saveErr.message;
+      err.style.color = 'var(--red, #ef5350)';
+      err.style.display = 'block';
+      return;
+    }
+
+    succ.style.display = 'block';
+    window.User = window.User || {};
+    window.User.llm_keys = keys;
+    // Live-refresh the WF hub's agent chip so the user sees the new
+    // selection without a page reload.
+    if (typeof window.wfUpdateAgentLabel === 'function') {
+      window.wfUpdateAgentLabel();
+    }
+    setTimeout(closeSettingsModal, 1500);
+  });
+}

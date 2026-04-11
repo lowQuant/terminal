@@ -22,7 +22,8 @@ CREATE TABLE public.profiles (
     subscription_tier TEXT NOT NULL DEFAULT 'free',   -- 'free', 'pro', 'premium', etc.
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,    -- manual kill switch
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    llm_keys        JSONB DEFAULT '{}'
 );
 
 COMMENT ON TABLE  public.profiles IS 'Public user profiles — one row per auth.users entry';

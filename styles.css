@@ -2528,7 +2528,8 @@ body {
   font-weight: 500;
 }
 
-.user-nav__logout {
+.user-nav__logout,
+.user-nav__settings {
   background: none;
   border: 1px solid var(--border-primary);
   border-radius: var(--radius);
@@ -2538,6 +2539,16 @@ body {
   color: var(--text-tertiary);
   cursor: pointer;
   transition: all 0.2s var(--ease);
+}
+
+.user-nav__settings {
+  padding: 4px 8px; /* Slightly tighter for the gear icon */
+}
+
+.user-nav__settings:hover {
+  color: var(--orange);
+  border-color: var(--orange);
+  background: rgba(255, 140, 0, 0.1);
 }
 
 .user-nav__logout:hover {
@@ -3882,4 +3893,1316 @@ body {
     gap: 10px;
     font-size: 10px;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   WF — WORKFLOWS
+   ═══════════════════════════════════════════════════════════════════ */
+
+.wf-dashboard {
+  padding: 0 !important;
+  /* Force flex column so the inner grid has a definite parent height.
+     The base .dashboard class uses ``display: grid`` with no explicit
+     row template, which leaves row height ambiguous — that ambiguity
+     was breaking wheel-scroll on the inner overflow container even
+     though the scrollbar was visible. */
+  display: flex !important;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wf-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr 380px;
+  /* Fill the flex parent instead of relying on height: 100%.
+     flex: 1 resolves cleanly against a definite parent; height: 100%
+     doesn't unless every ancestor has a definite height. */
+  flex: 1 1 0;
+  min-height: 0;
+  gap: 1px;
+  background: #1a1a22;
+}
+
+/* ── Scrollbar visibility — larger, always visible, themed ──
+   Default browser scrollbars are thin and nearly invisible on dark
+   backgrounds. Override them so the user can grab the thumb easily
+   and see their position in a long stream. */
+.wf-stream::-webkit-scrollbar,
+.wf-report__body::-webkit-scrollbar,
+.wf-sidebar__body::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+.wf-stream::-webkit-scrollbar-track,
+.wf-report__body::-webkit-scrollbar-track,
+.wf-sidebar__body::-webkit-scrollbar-track {
+  background: #0a0a0f;
+  border-left: 1px solid #1a1a22;
+}
+.wf-stream::-webkit-scrollbar-thumb,
+.wf-report__body::-webkit-scrollbar-thumb,
+.wf-sidebar__body::-webkit-scrollbar-thumb {
+  background: #2a2a33;
+  border: 2px solid #0a0a0f;
+  border-radius: 6px;
+  min-height: 40px;
+}
+.wf-stream::-webkit-scrollbar-thumb:hover,
+.wf-report__body::-webkit-scrollbar-thumb:hover,
+.wf-sidebar__body::-webkit-scrollbar-thumb:hover {
+  background: #ff8c00;
+}
+.wf-stream,
+.wf-report__body,
+.wf-sidebar__body {
+  /* Firefox — explicit colors */
+  scrollbar-width: auto;
+  scrollbar-color: #2a2a33 #0a0a0f;
+  /* Prevent wheel events from bubbling to ancestors that might eat them */
+  overscroll-behavior: contain;
+}
+
+.wf-sidebar,
+.wf-main,
+.wf-report {
+  background: var(--bg-panel, #0f0f14);
+  display: flex;
+  flex-direction: column;
+  /* Grid children must declare min-height:0 for flex overflow to work */
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.wf-sidebar {
+  /* Scrolling happens on the inner scroll container, not the flex
+     parent — the top header and the nl-compile box stay pinned. */
+}
+
+.wf-sidebar__body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 14px;
+}
+
+.wf-main {
+  /* overflow: hidden inherited */
+}
+
+.wf-report {
+  /* Column flex — header pinned, body scrolls */
+}
+
+.wf-report__body {
+  /* Proper flex child scroll */
+}
+
+
+
+.wf-sidebar__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #222;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+
+.wf-sidebar__title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: var(--orange, #ff8c00);
+  font-weight: 700;
+}
+
+.wf-agent-status {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: #1a1a22;
+  color: #8a8f98;
+  border: 1px solid #2a2a33;
+}
+
+.wf-agent-status--live {
+  color: #26a69a;
+  border-color: #26a69a44;
+  background: #0f1a18;
+}
+
+.wf-agent-status--off {
+  color: #aa8844;
+  border-color: #443322;
+  background: #1a1510;
+}
+
+.wf-nl-box {
+  background: #141419;
+  border: 1px solid #222;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.wf-nl-label {
+  display: block;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #6a6f78;
+  margin-bottom: 6px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-nl-textarea {
+  width: 100%;
+  background: #0a0a0f;
+  border: 1px solid #2a2a33;
+  color: #c0c5ce;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 6px 8px;
+  resize: vertical;
+  min-height: 48px;
+  margin-bottom: 6px;
+  box-sizing: border-box;
+}
+
+.wf-nl-textarea:focus {
+  outline: none;
+  border-color: var(--orange, #ff8c00);
+}
+
+.wf-sidebar__section {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #6a6f78;
+  margin: 12px 0 8px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wf-card {
+  padding: 10px 12px;
+  border: 1px solid #222;
+  background: #141419;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.wf-card:hover {
+  border-color: var(--orange, #ff8c00);
+  background: #1a1510;
+}
+
+.wf-card__name {
+  font-size: 12px;
+  color: #d4d4d4;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.wf-card__desc {
+  font-size: 10px;
+  color: #8a8f98;
+  line-height: 1.4;
+  margin-bottom: 5px;
+}
+
+.wf-card__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #6a6f78;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-empty,
+.wf-empty-inline {
+  color: #6a6f78;
+  font-size: 11px;
+  padding: 14px;
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-empty-inline {
+  padding: 6px;
+}
+
+/* ── MAIN (center) ── */
+
+.wf-main__header {
+  padding: 14px 18px;
+  border-bottom: 1px solid #222;
+  background: #0a0a0f;
+  /* Pinned — never steals space from the scrolling stream below */
+  flex-shrink: 0;
+}
+
+.wf-main__title {
+  font-size: 14px;
+  color: #d4d4d4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wf-main__code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 2px 7px;
+  background: var(--orange, #ff8c00);
+  color: #0a0a0f;
+  border-radius: 2px;
+  font-weight: 700;
+}
+
+.wf-main__code--adhoc {
+  background: #5e7cff;
+}
+
+.wf-main__desc {
+  color: #8a8f98;
+  font-size: 11px;
+  margin-top: 5px;
+  line-height: 1.4;
+}
+
+.wf-main__focus {
+  color: #c0c5ce;
+  font-size: 11px;
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--orange, #ff8c00);
+  line-height: 1.4;
+}
+
+.wf-stream {
+  padding: 18px 18px 80px;  /* generous bottom so last event isn't pinned to edge */
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1 1 0;
+  min-height: 0;
+  /* Behaves like a chat — content appends, view stays scrollable */
+  scroll-behavior: smooth;
+}
+
+.wf-placeholder {
+  color: #6a6f78;
+  text-align: center;
+  padding: 60px 20px;
+  max-width: 380px;
+  margin: 0 auto;
+}
+
+.wf-placeholder--error {
+  color: #ef5350;
+}
+
+.wf-placeholder__icon {
+  font-size: 28px;
+  color: var(--orange, #ff8c00);
+  margin-bottom: 12px;
+}
+
+.wf-placeholder__text {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.wf-placeholder--small {
+  padding: 20px;
+  font-size: 11px;
+}
+
+.wf-run-panel {
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+.wf-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.wf-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-input-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: #6a6f78;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wf-input {
+  background: #0a0a0f;
+  border: 1px solid #2a2a33;
+  color: #d4d4d4;
+  padding: 6px 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.wf-input:focus {
+  outline: none;
+  border-color: var(--orange, #ff8c00);
+}
+
+.wf-steps-preview {
+  background: #0f0f14;
+  border: 1px solid #222;
+  padding: 10px 12px;
+  margin-bottom: 18px;
+}
+
+.wf-steps-preview__title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: #6a6f78;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+}
+
+.wf-step-preview {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 11px;
+  border-bottom: 1px solid #161619;
+}
+
+.wf-step-preview:last-child { border-bottom: none; }
+
+.wf-step-preview__tool {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--orange, #ff8c00);
+  min-width: 50px;
+  font-weight: 600;
+}
+
+.wf-step-preview__label {
+  color: #8a8f98;
+}
+
+.wf-run-controls {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.wf-btn {
+  padding: 8px 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  background: #1a1a22;
+  color: #d4d4d4;
+  border: 1px solid #2a2a33;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.15s;
+}
+
+.wf-btn:hover:not(:disabled) {
+  border-color: var(--orange, #ff8c00);
+  color: var(--orange, #ff8c00);
+}
+
+.wf-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.wf-btn--primary {
+  background: var(--orange, #ff8c00);
+  color: #0a0a0f;
+  border-color: var(--orange, #ff8c00);
+  font-weight: 700;
+}
+
+.wf-btn--primary:hover:not(:disabled) {
+  background: #ffa033;
+  color: #0a0a0f;
+}
+
+.wf-btn--secondary {
+  background: #141419;
+  font-size: 10px;
+  padding: 6px 12px;
+  width: 100%;
+}
+
+/* ── RUN ACTIVE (live stream) ── */
+
+.wf-run-active {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.wf-run-active__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: #c0c5ce;
+}
+
+.wf-run-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--orange, #ff8c00);
+  box-shadow: 0 0 10px var(--orange, #ff8c00);
+  animation: wf-pulse 1.2s infinite;
+}
+
+.wf-run-dot--done {
+  background: #26a69a;
+  box-shadow: 0 0 10px #26a69a;
+  animation: none;
+}
+
+@keyframes wf-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.wf-events {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wf-event {
+  background: #0f0f14;
+  border-left: 2px solid #2a2a33;
+  padding: 8px 12px;
+  border-radius: 0 3px 3px 0;
+}
+
+.wf-event--thought {
+  border-left-color: #5e7cff;
+  color: #a0a8c0;
+  font-style: italic;
+}
+
+.wf-event--error {
+  border-left-color: #ef5350;
+  color: #ef5350;
+}
+
+.wf-event--step-running {
+  border-left-color: var(--orange, #ff8c00);
+}
+
+.wf-event--step-done {
+  border-left-color: #26a69a;
+}
+
+.wf-event--step-error {
+  border-left-color: #ef5350;
+}
+
+.wf-event__text {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.wf-step__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+}
+
+.wf-step__spinner {
+  width: 8px;
+  height: 8px;
+  border: 1px solid #444;
+  border-top-color: var(--orange, #ff8c00);
+  border-radius: 50%;
+  animation: wf-spin 0.8s linear infinite;
+}
+
+.wf-event--step-done .wf-step__spinner {
+  border-color: #26a69a;
+  border-top-color: #26a69a;
+  animation: none;
+}
+
+.wf-event--step-error .wf-step__spinner {
+  border-color: #ef5350;
+  border-top-color: #ef5350;
+  animation: none;
+}
+
+@keyframes wf-spin {
+  to { transform: rotate(360deg); }
+}
+
+.wf-step__tool {
+  color: var(--orange, #ff8c00);
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.wf-step__label {
+  color: #c0c5ce;
+}
+
+.wf-step__params {
+  color: #6a6f78;
+  margin-left: auto;
+  font-size: 9px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-step__body {
+  padding-top: 6px;
+}
+
+.wf-step__summary {
+  color: #d4d4d4;
+  font-size: 11px;
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.wf-step__meta {
+  color: #6a6f78;
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  margin-bottom: 6px;
+}
+
+.wf-step__error {
+  color: #ef5350;
+  font-size: 11px;
+  padding: 6px;
+  background: #1a0f0f;
+  border-radius: 3px;
+}
+
+/* ── Widget rendering inside step ── */
+
+.wf-widget {
+  margin-top: 8px;
+  padding: 10px;
+  background: #0a0a0f;
+  border: 1px solid #1a1a22;
+  border-radius: 3px;
+}
+
+.wf-widget__title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: #6a6f78;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 6px;
+}
+
+.wf-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.wf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+}
+
+.wf-table th {
+  text-align: left;
+  color: #6a6f78;
+  font-weight: 400;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-bottom: 1px solid #222;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+}
+
+.wf-table td {
+  padding: 4px 8px;
+  color: #c0c5ce;
+  border-bottom: 1px solid #141419;
+}
+
+.wf-table tr:hover td {
+  background: #141419;
+}
+
+.wf-table td.wf-cell--up {
+  color: #26a69a;
+}
+
+.wf-table td.wf-cell--down {
+  color: #ef5350;
+}
+
+.wf-table__more {
+  font-size: 9px;
+  color: #6a6f78;
+  text-align: center;
+  padding: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.wf-info-cell {
+  padding: 6px 8px;
+  background: #0f0f14;
+  border-left: 2px solid #2a2a33;
+}
+
+.wf-info-cell__k {
+  font-size: 9px;
+  color: #6a6f78;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-info-cell__v {
+  font-size: 11px;
+  color: #d4d4d4;
+  margin-top: 2px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-news-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.wf-news-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid #141419;
+}
+
+.wf-news-list li:last-child { border-bottom: none; }
+
+.wf-news-list__title {
+  font-size: 11px;
+  color: #d4d4d4;
+  line-height: 1.4;
+}
+
+.wf-news-list__meta {
+  font-size: 9px;
+  color: #6a6f78;
+  margin-top: 2px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-spark {
+  width: 100%;
+  height: 80px;
+  display: block;
+}
+
+.wf-spark__range {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: #6a6f78;
+  margin-top: 4px;
+}
+
+.wf-raw {
+  font-size: 9px;
+  color: #8a8f98;
+  background: #0f0f14;
+  padding: 6px;
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* ── REPORT (right) ── */
+
+.wf-report__header {
+  padding: 14px 18px;
+  border-bottom: 1px solid #222;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;  /* pinned — never steals space from scrolling body */
+}
+
+.wf-report__title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: var(--orange, #ff8c00);
+  font-weight: 700;
+}
+
+.wf-report__body {
+  padding: 14px 18px;
+  overflow-y: auto;
+  flex: 1 1 0;
+  min-height: 0;  /* required for flex child to actually scroll */
+  font-size: 11px;
+  color: #c0c5ce;
+  line-height: 1.55;
+}
+
+.wf-report__section {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: #6a6f78;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 20px 0 10px;
+  border-top: 1px solid #222;
+  padding-top: 14px;
+}
+
+.wf-report-text h1,
+.wf-report-text h2,
+.wf-report-text h3 {
+  color: var(--orange, #ff8c00);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 14px 0 6px;
+}
+
+.wf-report-text strong {
+  color: #d4d4d4;
+}
+
+.wf-report-text code {
+  background: #1a1a22;
+  padding: 1px 5px;
+  border-radius: 2px;
+  font-size: 10px;
+  color: var(--orange, #ff8c00);
+}
+
+.wf-report-text ul {
+  padding-left: 18px;
+  margin: 6px 0;
+}
+
+.wf-report-text li {
+  margin: 3px 0;
+}
+
+.wf-report-shots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wf-report-shot-wrap {
+  background: #0a0a0f;
+  border: 1px solid #1a1a22;
+  padding: 6px;
+  border-radius: 3px;
+}
+
+.wf-report-shot-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: #6a6f78;
+  margin-bottom: 4px;
+}
+
+.wf-report-shot {
+  max-width: 100%;
+  display: block;
+  border-radius: 2px;
+}
+
+@media (max-width: 1200px) {
+  .wf-layout {
+    grid-template-columns: 260px 1fr 320px;
+  }
+}
+
+@media (max-width: 960px) {
+  .wf-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+  .wf-dashboard {
+    overflow: auto;
+    height: auto;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SETTINGS MODAL — provider/model selection, key chips
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Settings modal — rely entirely on the parent flex centering from
+   .article-modal. No positioning override needed; just clamp the
+   width to something sane for a form (narrower than the default
+   780px article layout, wider than our old cramped 560px). */
+.settings-modal__content {
+  max-width: 640px;
+  max-height: 90vh;
+  width: 92%;
+}
+
+/* The body is already scrollable via the base class — we just
+   tighten padding a hair to fit more fields without scrolling. */
+.settings-modal__content .article-modal__body {
+  padding: 18px 24px 22px;
+}
+
+/* Labels and help text get tight, consistent spacing */
+.settings-modal__content .auth-form__group {
+  margin-bottom: 12px;
+}
+
+.settings-modal__content .auth-form__label {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.settings-select {
+  background: var(--bg-input, #0a0a0f);
+  padding: 8px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.settings-hint {
+  font-size: 10px;
+  color: #6a6f78;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 8px;
+}
+
+.settings-hint--block {
+  display: block;
+  margin: 6px 0 0;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.settings-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 20px 0 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6a6f78;
+}
+
+.settings-divider::before,
+.settings-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #222;
+}
+
+.key-status {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: none;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+.key-status--set {
+  color: #26a69a;
+  background: #0f1a18;
+  border: 1px solid #26a69a44;
+}
+
+.key-status--unset {
+  color: #6a6f78;
+  background: #141419;
+  border: 1px solid #2a2a33;
+}
+
+/* Settings gear button in user nav */
+.user-nav__settings {
+  background: transparent;
+  border: 1px solid #2a2a33;
+  color: #8a8f98;
+  padding: 4px 10px;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 3px;
+  margin-right: 6px;
+  transition: all 0.15s;
+}
+
+.user-nav__settings:hover {
+  color: var(--orange, #ff8c00);
+  border-color: var(--orange, #ff8c00);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   WF — Collapsible panes + layout responsiveness
+   ═══════════════════════════════════════════════════════════════════ */
+
+.wf-layout {
+  /* Default: sidebar + main + report. Collapses adjust grid-template */
+  transition: grid-template-columns 0.25s ease;
+}
+
+/* Collapsed states — these flip a single grid-template-columns declaration
+   so the panes animate smoothly. Each pane's contents hide via overflow. */
+.wf-layout--left-collapsed {
+  grid-template-columns: 36px 1fr 380px;
+}
+.wf-layout--right-collapsed {
+  grid-template-columns: 300px 1fr 36px;
+}
+.wf-layout--both-collapsed {
+  grid-template-columns: 36px 1fr 36px;
+}
+.wf-layout--no-report {
+  /* When the run has not produced a report yet, hide the right pane
+     entirely. The middle panel gets the reclaimed space. */
+  grid-template-columns: 300px 1fr 0;
+}
+.wf-layout--no-report.wf-layout--left-collapsed {
+  grid-template-columns: 36px 1fr 0;
+}
+
+/* Collapsed content vanishes; the collapse strip stays visible */
+.wf-layout--left-collapsed .wf-sidebar > :not(.wf-collapse-strip),
+.wf-layout--right-collapsed .wf-report > :not(.wf-collapse-strip),
+.wf-layout--both-collapsed .wf-sidebar > :not(.wf-collapse-strip),
+.wf-layout--both-collapsed .wf-report > :not(.wf-collapse-strip) {
+  display: none;
+}
+.wf-layout--no-report .wf-report {
+  display: none;
+}
+
+/* Collapse strips — tall buttons on the inner edge of each pane */
+.wf-collapse-strip {
+  display: none;
+  width: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0;
+  cursor: pointer;
+  color: #6a6f78;
+  font-size: 11px;
+  writing-mode: vertical-rl;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-family: 'JetBrains Mono', monospace;
+  border-right: 1px solid #222;
+  flex-shrink: 0;
+  background: #0a0a0f;
+  transition: color 0.15s, background 0.15s;
+}
+.wf-collapse-strip:hover {
+  color: var(--orange, #ff8c00);
+  background: #141014;
+}
+.wf-layout--left-collapsed .wf-sidebar .wf-collapse-strip,
+.wf-layout--right-collapsed .wf-report .wf-collapse-strip,
+.wf-layout--both-collapsed .wf-collapse-strip {
+  display: flex;
+}
+.wf-layout--right-collapsed .wf-report .wf-collapse-strip {
+  border-right: none;
+  border-left: 1px solid #222;
+}
+
+/* Normal-state toggle button in each pane's header */
+.wf-pane-toggle {
+  background: transparent;
+  border: 1px solid #2a2a33;
+  color: #6a6f78;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  border-radius: 2px;
+  margin-left: 8px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wf-pane-toggle:hover {
+  color: var(--orange, #ff8c00);
+  border-color: var(--orange, #ff8c00);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   WF — Workflow builder
+   ═══════════════════════════════════════════════════════════════════ */
+
+.wf-builder {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.wf-builder__section {
+  margin-bottom: 20px;
+}
+
+.wf-builder__label {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: #6a6f78;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 4px;
+}
+
+.wf-builder__input,
+.wf-builder__textarea {
+  width: 100%;
+  background: #0a0a0f;
+  border: 1px solid #2a2a33;
+  color: #d4d4d4;
+  padding: 8px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  box-sizing: border-box;
+  border-radius: 2px;
+}
+.wf-builder__textarea {
+  resize: vertical;
+  min-height: 50px;
+}
+.wf-builder__input:focus,
+.wf-builder__textarea:focus {
+  outline: none;
+  border-color: var(--orange, #ff8c00);
+}
+
+.wf-builder__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.wf-step-row {
+  display: grid;
+  grid-template-columns: 24px 130px 1fr 28px;
+  gap: 8px;
+  align-items: start;
+  padding: 10px;
+  background: #0f0f14;
+  border: 1px solid #222;
+  border-radius: 3px;
+}
+
+.wf-step-row__idx {
+  font-family: 'JetBrains Mono', monospace;
+  color: #6a6f78;
+  font-size: 10px;
+  padding-top: 8px;
+  text-align: right;
+}
+
+.wf-step-row__tool {
+  background: #0a0a0f;
+  border: 1px solid #2a2a33;
+  color: var(--orange, #ff8c00);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 8px;
+  border-radius: 2px;
+}
+.wf-step-row__tool:focus {
+  outline: none;
+  border-color: var(--orange, #ff8c00);
+}
+
+.wf-step-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wf-step-row__label-input,
+.wf-step-row__params-input {
+  background: #0a0a0f;
+  border: 1px solid #2a2a33;
+  color: #d4d4d4;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 2px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.wf-step-row__params-input {
+  resize: vertical;
+  min-height: 28px;
+  font-size: 10px;
+}
+.wf-step-row__label-input:focus,
+.wf-step-row__params-input:focus {
+  outline: none;
+  border-color: var(--orange, #ff8c00);
+}
+
+.wf-step-row__remove {
+  background: transparent;
+  border: 1px solid #2a2a33;
+  color: #6a6f78;
+  cursor: pointer;
+  border-radius: 2px;
+  font-size: 14px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-top: 4px;
+}
+.wf-step-row__remove:hover {
+  color: #ef5350;
+  border-color: #ef5350;
+}
+
+.wf-step-row__hint {
+  font-size: 10px;
+  color: #8a8f98;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 4px 6px;
+  background: #08080c;
+  border-left: 2px solid #2a2a33;
+  border-radius: 0 2px 2px 0;
+  line-height: 1.5;
+}
+
+.wf-step-row__desc {
+  color: #c0c5ce;
+  font-size: 10px;
+  margin-bottom: 3px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.4;
+}
+
+.wf-step-row__params {
+  color: #6a6f78;
+  font-size: 9px;
+  word-break: break-all;
+}
+
+.wf-builder__actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #222;
+  margin-top: 16px;
+}
+
+.wf-builder__actions-left {
+  margin-right: auto;
+}
+
+/* ── Workflow card buttons (edit / delete) ── */
+.wf-card {
+  position: relative;
+}
+
+.wf-card__actions {
+  display: none;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  gap: 4px;
+}
+.wf-card:hover .wf-card__actions {
+  display: flex;
+}
+
+.wf-card__action-btn {
+  background: #141419;
+  border: 1px solid #2a2a33;
+  color: #6a6f78;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 11px;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wf-card__action-btn:hover {
+  color: var(--orange, #ff8c00);
+  border-color: var(--orange, #ff8c00);
+}
+.wf-card__action-btn--danger:hover {
+  color: #ef5350;
+  border-color: #ef5350;
+}
+
+/* "New workflow" button at the top of the saved list */
+.wf-new-btn {
+  width: 100%;
+  text-align: left;
+  background: #0a0a0f;
+  border: 1px dashed #2a2a33;
+  color: #8a8f98;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  border-radius: 3px;
+  margin-bottom: 8px;
+}
+.wf-new-btn:hover {
+  border-color: var(--orange, #ff8c00);
+  color: var(--orange, #ff8c00);
 }

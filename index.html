@@ -181,6 +181,7 @@
   <!-- ══════════ USER NAV (shown when logged in) ══════════ -->
   <div id="user-nav" class="user-nav" style="display:none">
     <span class="user-nav__name" id="user-display-name"></span>
+    <button class="user-nav__settings" id="settings-btn" title="Settings">⚙</button>
     <button class="user-nav__logout" id="logout-btn" title="Sign out">Sign Out</button>
   </div>
 
@@ -339,11 +340,109 @@
     </div>
   </div>
 
+  <!-- ══════════ SETTINGS MODAL ══════════ -->
+  <div class="article-modal" id="settings-modal" style="z-index: 10000;">
+    <div class="article-modal__content settings-modal__content">
+      <div class="article-modal__header">
+        <div class="article-modal__header-info">
+          <div class="article-modal__title">Agent Settings</div>
+        </div>
+        <button class="article-modal__close" id="settings-close-btn" title="Close">✕</button>
+      </div>
+      <div class="article-modal__body" style="padding: 24px;">
+        <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 0.85rem; line-height: 1.5;">
+          Configure LLM providers for Agentic Workflows. Pick the primary provider — only that provider's key will be used for agent runs. Other keys stay stored for quick switching. Keys never leave your browser except on workflow run.
+        </p>
+        <form id="settings-form" class="auth-form" autocomplete="off">
+
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="settings-provider">Primary Provider</label>
+            <select class="auth-form__input settings-select" id="settings-provider">
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="openai">OpenAI (GPT)</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="perplexity">Perplexity</option>
+              <option value="openrouter">OpenRouter (400+ models)</option>
+            </select>
+          </div>
+
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="settings-agent-model">
+              Model
+              <span id="settings-model-hint" class="settings-hint"></span>
+            </label>
+            <!-- OpenRouter has 400+ entries — swap to a searchable input -->
+            <div id="settings-model-wrap">
+              <select class="auth-form__input settings-select" id="settings-agent-model"></select>
+            </div>
+            <div id="settings-openrouter-wrap" style="display:none">
+              <input class="auth-form__input settings-select" id="settings-openrouter-model"
+                     list="openrouter-models-datalist" placeholder="Type to search models…">
+              <datalist id="openrouter-models-datalist"></datalist>
+              <div id="settings-openrouter-info" class="settings-hint settings-hint--block"></div>
+            </div>
+          </div>
+
+          <div class="settings-divider">
+            <span>API keys</span>
+          </div>
+
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="key-anthropic">
+              Anthropic API Key
+              <span class="key-status" id="status-anthropic"></span>
+            </label>
+            <input class="auth-form__input" type="password" id="key-anthropic" placeholder="sk-ant-...">
+          </div>
+
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="key-openai">
+              OpenAI API Key
+              <span class="key-status" id="status-openai"></span>
+            </label>
+            <input class="auth-form__input" type="password" id="key-openai" placeholder="sk-...">
+          </div>
+
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="key-gemini">
+              Google Gemini API Key
+              <span class="key-status" id="status-gemini"></span>
+            </label>
+            <input class="auth-form__input" type="password" id="key-gemini" placeholder="AIza...">
+          </div>
+
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="key-perplexity">
+              Perplexity API Key
+              <span class="key-status" id="status-perplexity"></span>
+            </label>
+            <input class="auth-form__input" type="password" id="key-perplexity" placeholder="pplx-...">
+          </div>
+
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="key-openrouter">
+              OpenRouter API Key
+              <span class="key-status" id="status-openrouter"></span>
+            </label>
+            <input class="auth-form__input" type="password" id="key-openrouter" placeholder="sk-or-v1-...">
+          </div>
+
+          <div class="auth-form__error" id="settings-error" style="display:none"></div>
+          <div class="auth-form__success" id="settings-success" style="color: var(--green); font-size: 0.85rem; margin-bottom: 1rem; display: none;">Saved successfully!</div>
+          <button class="auth-btn auth-btn--primary" type="submit" id="settings-submit" style="width: 100%;">
+            <span class="auth-btn__text">Save Settings</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="auth.js"></script>
   <script src="app.js"></script>
+  <script src="wf.js"></script>
 
 </body>
 

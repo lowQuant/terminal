@@ -467,7 +467,7 @@ def get_article():
 
 
 if __name__ == '__main__':
-    print('\n  TERMINAL Server')
+    print('\n  TERMINAL Server TEST')
     print('  ═══════════════════════════')
     print('  http://localhost:8888')
     print('  ═══════════════════════════\n')

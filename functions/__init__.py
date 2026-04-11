@@ -20,6 +20,7 @@ from functions.mov import mov_bp
 from functions.eqs import eqs_bp
 from functions.omon import omon_bp
 from functions.watchlist import watchlist_bp
+from functions.workflow import wf_bp
 from functions._countries import COUNTRIES, all_with_eco, all_with_scanner, to_json
 
 # ── Shared countries endpoint ──
@@ -55,7 +56,8 @@ ALL_BLUEPRINTS = [
     eqs_bp,
     omon_bp,
     watchlist_bp,
+    wf_bp,
 ]
 
 
-__all__ = ['ALL_BLUEPRINTS', 'eco_bp', 'evts_bp']
+__all__ = ['ALL_BLUEPRINTS', 'eco_bp', 'evts_bp', 'wf_bp']

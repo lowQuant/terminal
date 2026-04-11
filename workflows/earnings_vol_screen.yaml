@@ -1,0 +1,42 @@
+name: Earnings Vol Screen
+description: >
+  Find names reporting earnings in the next week and check whether the
+  options market is richly pricing the move. Candidates for short vol
+  if skew/ATM IV looks elevated relative to realized.
+focus: >
+  Which upcoming earnings are the options market aggressively pricing?
+  Rank candidates by the gap between ATM IV (annualized) and realized
+  vol from the 3-month history. Flag names where the implied move
+  looks overpriced relative to recent realized.
+
+inputs:
+  country:
+    type: string
+    default: US
+  days:
+    type: integer
+    default: 7
+
+steps:
+  - id: earnings
+    tool: EVTS
+    label: Upcoming earnings
+    params:
+      country: "{{inputs.country}}"
+      days: "{{inputs.days}}"
+      limit: 15
+
+  # Agentic mode will expand this step into per-ticker IVOL/HIST calls
+  # based on the earnings list. Scripted mode will still run the single
+  # reference call below so the skeleton is complete.
+  - id: reference_vol
+    tool: IVOL
+    label: Reference vol (first name)
+    depends_on: [earnings]
+    params:
+      symbol: "{{steps.earnings.data.rows.0.symbol}}"
+
+tags:
+  - earnings
+  - options
+  - screening

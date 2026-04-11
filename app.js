@@ -292,6 +292,13 @@ const FUNCTIONS = [
     implemented: true,
     stockSpecific: true,
   },
+  {
+    code: 'WF',
+    name: 'Workflows',
+    desc: 'Agentic research workflows — chain functions with Claude analysis',
+    aliases: ['WF', 'WORKFLOW', 'WORKFLOWS', 'AGENT', 'RUN'],
+    implemented: true,
+  },
   // Bloomberg tab shortcuts — route to stock-context tabs
   {
     code: 'DES',
@@ -402,6 +409,7 @@ function openFunction(code) {
     case 'EQS':  renderEquityScreener(dashboard); break;
     case 'OMON': renderOMON(dashboard); break;
     case 'IVOL': renderIVOL(dashboard); break;
+    case 'WF':   renderWorkflowHub(dashboard); break;
   }
   updateStatusBar();
 }
