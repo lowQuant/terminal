@@ -57,50 +57,55 @@ load_workflows_from_dir(WORKFLOWS_DIR)
 # Run registry — in-memory, keyed by run_id
 # ═══════════════════════════════════════════════════════════════════
 
-class Run:
-    """A live workflow run.
+import tempfile as _tempfile
 
-    Events are stored in an append-only ``event_log`` list that the
-    polling endpoint reads from (``/api/wf/poll/<id>?since=N``). This
-    replaces the old queue-based SSE approach which broke on hosts
-    where the WSGI server buffers streaming responses (PythonAnywhere,
-    Heroku, many uWSGI setups). Polling at 1s intervals is simple,
-    proxy-agnostic, and perfectly adequate for workflows that take
-    5-60 seconds to complete.
+# Runs are stored as JSON-lines files on disk so they survive uWSGI's
+# multi-process model (PythonAnywhere spawns multiple workers; an
+# in-memory dict is per-process, so the worker that handles the POST
+# and the one that handles the poll may be different). The filesystem
+# is shared, so any worker can read any run's events.
+
+_RUNS_DIR = os.path.join(_tempfile.gettempdir(), "wf_runs")
+os.makedirs(_RUNS_DIR, exist_ok=True)
+
+
+class Run:
+    """A live workflow run backed by a JSONL file on disk.
+
+    ``emit()`` appends one JSON line per event. The poll endpoint
+    reads the file and slices from ``since``. No in-memory state
+    needs to be shared across processes.
     """
 
     def __init__(self, run_id: str, workflow: Workflow, inputs: Dict[str, Any]):
         self.id = run_id
         self.workflow = workflow
         self.inputs = inputs
-        self.event_log: list = []   # append-only, read by poll endpoint
-        self._lock = threading.Lock()
-        self.created_at = time.time()
-        self.done = False
+        self.filepath = os.path.join(_RUNS_DIR, f"{run_id}.jsonl")
+        # Create the file immediately so the poll endpoint can find it
+        with open(self.filepath, "w") as f:
+            pass  # empty file — events will be appended
 
     def emit(self, event_type: str, payload: Dict[str, Any]) -> None:
-        evt = {"type": event_type, "payload": payload}
-        with self._lock:
-            self.event_log.append(evt)
-        if event_type == "done":
-            self.done = True
-
-
-_runs: Dict[str, Run] = {}
-_runs_lock = threading.Lock()
+        line = json.dumps({"type": event_type, "payload": payload}, default=str)
+        with open(self.filepath, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
 
 
 def _new_run(workflow: Workflow, inputs: Dict[str, Any]) -> Run:
     run_id = uuid.uuid4().hex[:12]
     run = Run(run_id, workflow, inputs)
-    with _runs_lock:
-        # Prune old finished runs (keep last 50)
-        if len(_runs) > 50:
-            oldest = sorted(_runs.values(), key=lambda r: r.created_at)[:10]
-            for r in oldest:
-                if r.done:
-                    _runs.pop(r.id, None)
-        _runs[run_id] = run
+
+    # Prune old run files (> 10 min old) to keep /tmp clean
+    try:
+        cutoff = time.time() - 600
+        for fname in os.listdir(_RUNS_DIR):
+            fpath = os.path.join(_RUNS_DIR, fname)
+            if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
+                os.remove(fpath)
+    except Exception:
+        pass  # cleanup is best-effort
+
     return run
 
 
@@ -418,22 +423,23 @@ def start_run():
 def poll_run(run_id: str):
     """Poll for workflow events.
 
+    Reads the JSONL file for this run and returns events from index
+    ``since`` onward. Completely process-agnostic — any uWSGI worker
+    can serve this because the state is on the filesystem, not in
+    per-process memory.
+
     Query params:
-        ``since`` — event index to start from (default 0). The
-        response includes all events from ``since`` to the end of
-        the log, plus ``next`` (the index for the next poll) and
-        ``done`` (whether the run has finished).
+        ``since`` — line number to start from (default 0)
 
-    The frontend polls this endpoint at ~1s intervals. It's
-    proxy-agnostic — no SSE, no streaming, no uWSGI buffering
-    issues. Works on PythonAnywhere, Heroku, any WSGI host.
-
-    Replaces the old ``/api/wf/stream/<run_id>`` SSE endpoint
-    which broke on hosts that buffer chunked responses.
+    Response:
+        ``{events: [...], since, next, done}``
     """
-    with _runs_lock:
-        run = _runs.get(run_id)
-    if run is None:
+    # Sanitize run_id to prevent path traversal
+    if not run_id.isalnum():
+        return jsonify({"error": "invalid run_id"}), 400
+
+    filepath = os.path.join(_RUNS_DIR, f"{run_id}.jsonl")
+    if not os.path.isfile(filepath):
         return jsonify({"error": "unknown run_id"}), 404
 
     try:
@@ -441,24 +447,42 @@ def poll_run(run_id: str):
     except (ValueError, TypeError):
         since = 0
 
-    with run._lock:
-        events = run.event_log[since:]
+    # Read all lines and slice from ``since``
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception as e:
+        return jsonify({"error": f"read failed: {e}"}), 500
 
-    serialized = []
-    for evt in events:
+    events = []
+    done = False
+    for line in lines[since:]:
+        line = line.strip()
+        if not line:
+            continue
         try:
-            serialized.append({
-                "type": evt.get("type"),
-                "payload": json.loads(json.dumps(evt.get("payload") or {}, default=str)),
-            })
+            evt = json.loads(line)
+            events.append(evt)
+            if evt.get("type") == "done":
+                done = True
+        except json.JSONDecodeError:
+            continue
+
+    # Also check the last line of the FULL file for done (in case
+    # ``since`` is past the done event from a previous poll)
+    if not done and lines:
+        try:
+            last = json.loads(lines[-1].strip())
+            if last.get("type") == "done":
+                done = True
         except Exception:
-            serialized.append({"type": evt.get("type"), "payload": {}})
+            pass
 
     return jsonify({
-        "events": serialized,
+        "events": events,
         "since": since,
-        "next": since + len(serialized),
-        "done": run.done,
+        "next": since + len(events),
+        "done": done,
     })
 
 
