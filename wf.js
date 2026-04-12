@@ -780,6 +780,8 @@ async function wfStartRun(workflowId, inputs, wfMeta, adHocSpec = null, mode = '
       || '',
   };
 
+  wfInitStreamUI(wfMeta);
+
   try {
     const res = await fetch('/api/wf/run', {
       method: 'POST',
@@ -787,13 +789,15 @@ async function wfStartRun(workflowId, inputs, wfMeta, adHocSpec = null, mode = '
       body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (data.error) {
+    if (data.error && !data.events) {
       wfShowError(data.error);
       return;
     }
-    WF.currentRun = data.run_id;
-    wfInitStreamUI(wfMeta);
-    wfConnectPoll(data.run_id);
+
+    // The POST runs the entire workflow synchronously and returns
+    // all events at once. Replay them sequentially with a small
+    // delay so the user sees each step light up.
+    await wfReplayEvents(data.events || []);
   } catch (err) {
     wfShowError(String(err));
   }
@@ -835,84 +839,54 @@ function wfUpdateRunHeader(state, cls) {
   }
 }
 
-function wfConnectPoll(runId) {
-  let cursor = 0;
+async function wfReplayEvents(events) {
+  // The backend ran the entire workflow synchronously and returned
+  // all events at once. We replay them with small delays so the
+  // user sees each step animate (spinner → result → next step).
   let hadError = false;
-  let pollInterval = 300;   // fast initial poll (300ms) — slows to 1s after first events
 
-  function schedulePoll() {
-    setTimeout(doPoll, pollInterval);
-  }
-
-  async function doPoll() {
-    try {
-      const res = await fetch(`/api/wf/poll/${runId}?since=${cursor}`);
-      if (!res.ok) {
-        clearInterval(timer);
-        wfAppendThought(`Poll error: HTTP ${res.status}`, 'error');
-        wfUpdateRunHeader('Failed', 'wf-run-dot--error');
-        return;
-      }
-      const data = await res.json();
-      cursor = data.next || cursor;
-
-      // Process every new event exactly like the old SSE handler
-      for (const evt of (data.events || [])) {
-        switch (evt.type) {
-          case 'workflow_start':
-            wfAppendThought(`Starting (${evt.payload?.mode || 'auto'} mode)…`);
-            break;
-          case 'step_start':
-            wfAppendStepStart(evt.payload);
-            break;
-          case 'step_result':
-            wfAppendStepResult(evt.payload);
-            break;
-          case 'agent_thought':
-            wfAppendThought(evt.payload?.text || '');
-            break;
-          case 'final_report':
-            WF.finalReport = evt.payload;
-            // Force the right pane open — the user wants to see the
-            // report immediately, regardless of any prior collapse state
-            WF.rightCollapsed = false;
-            wfSaveLayout();
-            wfApplyLayoutClass();
-            wfRenderReport(evt.payload);
-            break;
-          case 'error':
-            wfAppendThought('⚠ ' + (evt.payload?.message || 'error'), 'error');
-            hadError = true;
-            break;
-          case 'done':
-            // Will be handled below after the loop
-            break;
-        }
-      }
-
-      // Slow down after first events arrive (no need to hammer)
-      if (data.events && data.events.length > 0) {
-        pollInterval = 1000;
-      }
-
-      // Done? Stop polling and finalize the header.
-      if (data.done) {
-        wfUpdateRunHeader(
-          hadError ? 'Failed' : 'Completed',
-          hadError ? 'wf-run-dot--error' : 'wf-run-dot--done',
-        );
-        wfScrollToBottom();
-        return; // don't schedule another poll
-      }
-    } catch (err) {
-      // Network error — keep trying
-      console.warn('WF poll error:', err);
+  for (const evt of events) {
+    switch (evt.type) {
+      case 'workflow_start':
+        wfAppendThought(`Starting (${evt.payload?.mode || 'auto'} mode)…`);
+        break;
+      case 'step_start':
+        wfAppendStepStart(evt.payload);
+        await wfDelay(80);
+        break;
+      case 'step_result':
+        wfAppendStepResult(evt.payload);
+        await wfDelay(120);
+        break;
+      case 'agent_thought':
+        wfAppendThought(evt.payload?.text || '');
+        await wfDelay(60);
+        break;
+      case 'final_report':
+        WF.finalReport = evt.payload;
+        WF.rightCollapsed = false;
+        wfSaveLayout();
+        wfApplyLayoutClass();
+        wfRenderReport(evt.payload);
+        break;
+      case 'error':
+        wfAppendThought('⚠ ' + (evt.payload?.message || 'error'), 'error');
+        hadError = true;
+        break;
+      case 'done':
+        break;
     }
-    schedulePoll();
   }
 
-  // Kick off the first poll immediately
-  doPoll();
+  wfUpdateRunHeader(
+    hadError ? 'Failed' : 'Completed',
+    hadError ? 'wf-run-dot--error' : 'wf-run-dot--done',
+  );
+  wfScrollToBottom();
+}
+
+function wfDelay(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 /* ─────────────────────────────────────────────────────────────────

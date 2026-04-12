@@ -19,9 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import threading
-import time
-import uuid
 from typing import Any, Dict, Optional
 
 from flask import Blueprint, jsonify, request
@@ -57,56 +54,25 @@ load_workflows_from_dir(WORKFLOWS_DIR)
 # Run registry — in-memory, keyed by run_id
 # ═══════════════════════════════════════════════════════════════════
 
-import tempfile as _tempfile
+class EventCollector:
+    """Collects all events in a list during a synchronous workflow run.
 
-# Runs are stored as JSON-lines files on disk so they survive uWSGI's
-# multi-process model (PythonAnywhere spawns multiple workers; an
-# in-memory dict is per-process, so the worker that handles the POST
-# and the one that handles the poll may be different). The filesystem
-# is shared, so any worker can read any run's events.
-
-_RUNS_DIR = os.path.join(_tempfile.gettempdir(), "wf_runs")
-os.makedirs(_RUNS_DIR, exist_ok=True)
-
-
-class Run:
-    """A live workflow run backed by a JSONL file on disk.
-
-    ``emit()`` appends one JSON line per event. The poll endpoint
-    reads the file and slices from ``since``. No in-memory state
-    needs to be shared across processes.
+    No threads, no files, no polling, no SSE. The POST handler runs
+    the entire workflow in the request thread, collects every event,
+    and returns them all in one JSON response. Dead simple, works on
+    every WSGI host including PythonAnywhere's multi-worker uWSGI
+    where background threads, temp files, and streaming responses all
+    have reliability issues.
     """
 
-    def __init__(self, run_id: str, workflow: Workflow, inputs: Dict[str, Any]):
-        self.id = run_id
-        self.workflow = workflow
-        self.inputs = inputs
-        self.filepath = os.path.join(_RUNS_DIR, f"{run_id}.jsonl")
-        # Create the file immediately so the poll endpoint can find it
-        with open(self.filepath, "w") as f:
-            pass  # empty file — events will be appended
+    def __init__(self) -> None:
+        self.events: list = []
 
     def emit(self, event_type: str, payload: Dict[str, Any]) -> None:
-        line = json.dumps({"type": event_type, "payload": payload}, default=str)
-        with open(self.filepath, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-
-
-def _new_run(workflow: Workflow, inputs: Dict[str, Any]) -> Run:
-    run_id = uuid.uuid4().hex[:12]
-    run = Run(run_id, workflow, inputs)
-
-    # Prune old run files (> 10 min old) to keep /tmp clean
-    try:
-        cutoff = time.time() - 600
-        for fname in os.listdir(_RUNS_DIR):
-            fpath = os.path.join(_RUNS_DIR, fname)
-            if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
-                os.remove(fpath)
-    except Exception:
-        pass  # cleanup is best-effort
-
-    return run
+        self.events.append({
+            "type": event_type,
+            "payload": json.loads(json.dumps(payload, default=str)),
+        })
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -425,91 +391,31 @@ def start_run():
     else:
         return jsonify({"error": "workflow_id or workflow required"}), 400
 
-    run = _new_run(workflow, inputs)
+    # Run the ENTIRE workflow synchronously in this request thread.
+    # No background threads, no files, no polling — just collect all
+    # events and return them in one shot. This is the only approach
+    # that works reliably on PythonAnywhere's multi-worker uWSGI
+    # where background threads die, temp files vanish between workers,
+    # and SSE streams get buffered into oblivion.
+    #
+    # PA's request timeout is 300 seconds — plenty for even complex
+    # agentic workflows with multiple LLM turns.
+    collector = EventCollector()
+    try:
+        run_workflow(
+            workflow, inputs, collector.emit,
+            mode=mode, llm_keys=llm_keys, user_context=user_context,
+        )
+    except Exception as e:  # noqa: BLE001
+        collector.emit("error", {"message": str(e)})
+        collector.emit("done", {})
 
-    def worker():
-        try:
-            run_workflow(
-                workflow, inputs, run.emit,
-                mode=mode, llm_keys=llm_keys, user_context=user_context,
-            )
-        except Exception as e:  # noqa: BLE001
-            run.emit("error", {"message": str(e)})
-            run.emit("done", {})
-
-    threading.Thread(target=worker, daemon=True).start()
     return jsonify({
-        "run_id": run.id,
         "workflow_id": workflow.id,
         "name": workflow.name,
         "step_count": len(workflow.steps),
-    })
-
-
-@wf_bp.route("/api/wf/poll/<run_id>")
-def poll_run(run_id: str):
-    """Poll for workflow events.
-
-    Reads the JSONL file for this run and returns events from index
-    ``since`` onward. Completely process-agnostic — any uWSGI worker
-    can serve this because the state is on the filesystem, not in
-    per-process memory.
-
-    Query params:
-        ``since`` — line number to start from (default 0)
-
-    Response:
-        ``{events: [...], since, next, done}``
-    """
-    # Sanitize run_id to prevent path traversal
-    if not run_id.isalnum():
-        return jsonify({"error": "invalid run_id"}), 400
-
-    filepath = os.path.join(_RUNS_DIR, f"{run_id}.jsonl")
-    if not os.path.isfile(filepath):
-        return jsonify({"error": "unknown run_id"}), 404
-
-    try:
-        since = int(request.args.get("since", 0))
-    except (ValueError, TypeError):
-        since = 0
-
-    # Read all lines and slice from ``since``
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-    except Exception as e:
-        return jsonify({"error": f"read failed: {e}"}), 500
-
-    events = []
-    done = False
-    for line in lines[since:]:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            evt = json.loads(line)
-            events.append(evt)
-            if evt.get("type") == "done":
-                done = True
-        except json.JSONDecodeError:
-            continue
-
-    # Also check the last line of the FULL file for done (in case
-    # ``since`` is past the done event from a previous poll)
-    if not done and lines:
-        try:
-            last = json.loads(lines[-1].strip())
-            if last.get("type") == "done":
-                done = True
-        except Exception:
-            pass
-
-    return jsonify({
-        "events": events,
-        "since": since,
-        "next": since + len(events),
-        "done": done,
+        "events": collector.events,
+        "done": True,
     })
 
 
