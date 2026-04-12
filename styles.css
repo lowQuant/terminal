@@ -5219,23 +5219,49 @@ body {
   color: var(--orange, #ff8c00);
 }
 
-/* ── WF run mode selector ── */
-.wf-mode-select {
-  background: #0a0a0f;
+/* ── WF run mode toggle (radio pill) ── */
+.wf-mode-toggle {
+  display: inline-flex;
   border: 1px solid #2a2a33;
-  color: #c0c5ce;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  padding: 7px 10px;
   border-radius: 3px;
+  overflow: hidden;
+  margin-right: 10px;
+}
+.wf-mode-opt {
+  display: flex;
+  align-items: center;
   cursor: pointer;
-  margin-right: 8px;
+  margin: 0;
 }
-.wf-mode-select:focus {
-  outline: none;
-  border-color: var(--orange, #ff8c00);
+.wf-mode-opt input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
 }
-.wf-mode-select option {
+.wf-mode-opt span {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 6px 14px;
+  color: #6a6f78;
   background: #0a0a0f;
-  color: #c0c5ce;
+  transition: all 0.12s;
+  border-right: 1px solid #2a2a33;
+  user-select: none;
+}
+.wf-mode-opt:last-child span { border-right: none; }
+.wf-mode-opt input:checked + span {
+  color: #0a0a0f;
+  background: var(--orange, #ff8c00);
+  font-weight: 600;
+}
+.wf-mode-opt:hover span {
+  color: #d4d4d4;
+  background: #141419;
+}
+.wf-mode-opt input:checked:hover + span {
+  color: #0a0a0f;
+  background: #ffa033;
 }

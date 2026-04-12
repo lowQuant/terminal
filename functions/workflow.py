@@ -19,13 +19,12 @@ from __future__ import annotations
 
 import json
 import os
-import queue
 import threading
 import time
 import uuid
 from typing import Any, Dict, Optional
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, jsonify, request
 
 from functions._workflow import (
     WORKFLOWS,
@@ -59,22 +58,30 @@ load_workflows_from_dir(WORKFLOWS_DIR)
 # ═══════════════════════════════════════════════════════════════════
 
 class Run:
-    """A live workflow run — the queue holds pending events until the
-    SSE consumer drains them."""
+    """A live workflow run.
+
+    Events are stored in an append-only ``event_log`` list that the
+    polling endpoint reads from (``/api/wf/poll/<id>?since=N``). This
+    replaces the old queue-based SSE approach which broke on hosts
+    where the WSGI server buffers streaming responses (PythonAnywhere,
+    Heroku, many uWSGI setups). Polling at 1s intervals is simple,
+    proxy-agnostic, and perfectly adequate for workflows that take
+    5-60 seconds to complete.
+    """
 
     def __init__(self, run_id: str, workflow: Workflow, inputs: Dict[str, Any]):
         self.id = run_id
         self.workflow = workflow
         self.inputs = inputs
-        self.events: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=1000)
+        self.event_log: list = []   # append-only, read by poll endpoint
+        self._lock = threading.Lock()
         self.created_at = time.time()
         self.done = False
 
     def emit(self, event_type: str, payload: Dict[str, Any]) -> None:
-        try:
-            self.events.put_nowait({"type": event_type, "payload": payload})
-        except queue.Full:
-            pass
+        evt = {"type": event_type, "payload": payload}
+        with self._lock:
+            self.event_log.append(evt)
         if event_type == "done":
             self.done = True
 
@@ -407,47 +414,52 @@ def start_run():
     })
 
 
-@wf_bp.route("/api/wf/stream/<run_id>")
-def stream_run(run_id: str):
-    """Server-Sent Events stream for a run.
+@wf_bp.route("/api/wf/poll/<run_id>")
+def poll_run(run_id: str):
+    """Poll for workflow events.
 
-    Events are serialized as ``event: <type>\\ndata: <json>\\n\\n`` so the
-    client can use ``EventSource`` and register handlers per type.
+    Query params:
+        ``since`` — event index to start from (default 0). The
+        response includes all events from ``since`` to the end of
+        the log, plus ``next`` (the index for the next poll) and
+        ``done`` (whether the run has finished).
+
+    The frontend polls this endpoint at ~1s intervals. It's
+    proxy-agnostic — no SSE, no streaming, no uWSGI buffering
+    issues. Works on PythonAnywhere, Heroku, any WSGI host.
+
+    Replaces the old ``/api/wf/stream/<run_id>`` SSE endpoint
+    which broke on hosts that buffer chunked responses.
     """
     with _runs_lock:
         run = _runs.get(run_id)
     if run is None:
         return jsonify({"error": "unknown run_id"}), 404
 
-    def generate():
-        # Send an initial comment so the browser treats the stream as open
-        yield ": stream open\n\n"
-        while True:
-            try:
-                evt = run.events.get(timeout=30)
-            except queue.Empty:
-                # Heartbeat
-                yield ": keepalive\n\n"
-                if run.done:
-                    break
-                continue
+    try:
+        since = int(request.args.get("since", 0))
+    except (ValueError, TypeError):
+        since = 0
 
-            try:
-                payload = json.dumps(evt.get("payload") or {}, default=str)
-            except Exception:
-                payload = "{}"
-            yield f"event: {evt['type']}\ndata: {payload}\n\n"
+    with run._lock:
+        events = run.event_log[since:]
 
-            if evt["type"] == "done":
-                break
+    serialized = []
+    for evt in events:
+        try:
+            serialized.append({
+                "type": evt.get("type"),
+                "payload": json.loads(json.dumps(evt.get("payload") or {}, default=str)),
+            })
+        except Exception:
+            serialized.append({"type": evt.get("type"), "payload": {}})
 
-    headers = {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        "X-Accel-Buffering": "no",
-        "Connection": "keep-alive",
-    }
-    return Response(generate(), headers=headers)
+    return jsonify({
+        "events": serialized,
+        "since": since,
+        "next": since + len(serialized),
+        "done": run.done,
+    })
 
 
 @wf_bp.route("/api/wf/nl", methods=["POST"])

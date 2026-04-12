@@ -427,11 +427,16 @@ function wfShowRunPanel(workflowId) {
         `).join('')}
       </div>
       <div class="wf-run-controls">
-        <select class="wf-mode-select" id="wf-mode-select" title="Execution mode">
-          <option value="auto">Auto (agent if available)</option>
-          <option value="agentic">Agentic (requires API key)</option>
-          <option value="scripted">Scripted (no LLM)</option>
-        </select>
+        <div class="wf-mode-toggle" id="wf-mode-toggle">
+          <label class="wf-mode-opt">
+            <input type="radio" name="wf-mode" value="agentic">
+            <span>Agentic</span>
+          </label>
+          <label class="wf-mode-opt">
+            <input type="radio" name="wf-mode" value="scripted">
+            <span>Scripted</span>
+          </label>
+        </div>
         <button class="wf-btn wf-btn--primary wf-run-btn">
           ▶ Run
         </button>
@@ -443,16 +448,11 @@ function wfShowRunPanel(workflowId) {
   `;
 
   // Pre-select the mode based on whether the user has keys configured
-  const modeSelect = stream.querySelector('#wf-mode-select');
   const userKeys = window.User?.llm_keys || {};
   const hasKey = userKeys.provider && userKeys[userKeys.provider];
-  if (hasKey && WF.agentic) {
-    modeSelect.value = 'agentic';
-  } else if (hasKey) {
-    modeSelect.value = 'auto';
-  } else {
-    modeSelect.value = 'scripted';
-  }
+  const defaultMode = (hasKey && WF.agentic) ? 'agentic' : 'scripted';
+  const radios = stream.querySelectorAll('input[name="wf-mode"]');
+  radios.forEach((r) => { if (r.value === defaultMode) r.checked = true; });
 
   stream.querySelector('.wf-run-btn').addEventListener('click', () => {
     const inputValues = {};
@@ -462,7 +462,8 @@ function wfShowRunPanel(workflowId) {
       if (/^-?\d+$/.test(v)) v = parseInt(v, 10);
       inputValues[k] = v;
     });
-    const mode = modeSelect.value;
+    const checked = stream.querySelector('input[name="wf-mode"]:checked');
+    const mode = checked ? checked.value : 'auto';
     wfStartRun(wf.id, inputValues, wf, null, mode);
   });
   stream.querySelector('.wf-edit-btn').addEventListener('click', () => wfOpenEditor(wf.id));
@@ -788,7 +789,7 @@ async function wfStartRun(workflowId, inputs, wfMeta, adHocSpec = null, mode = '
     }
     WF.currentRun = data.run_id;
     wfInitStreamUI(wfMeta);
-    wfConnectSSE(data.run_id);
+    wfConnectPoll(data.run_id);
   } catch (err) {
     wfShowError(String(err));
   }
@@ -830,59 +831,66 @@ function wfUpdateRunHeader(state, cls) {
   }
 }
 
-function wfConnectSSE(runId) {
-  const es = new EventSource(`/api/wf/stream/${runId}`);
+function wfConnectPoll(runId) {
+  let cursor = 0;
+  let hadError = false;
 
-  es.addEventListener('workflow_start', (e) => {
-    const data = JSON.parse(e.data);
-    wfAppendThought(`Starting (${data.mode} mode)…`);
-  });
-
-  es.addEventListener('step_start', (e) => {
-    wfAppendStepStart(JSON.parse(e.data));
-  });
-
-  es.addEventListener('step_result', (e) => {
-    wfAppendStepResult(JSON.parse(e.data));
-  });
-
-  es.addEventListener('agent_thought', (e) => {
-    wfAppendThought(JSON.parse(e.data).text);
-  });
-
-  es.addEventListener('final_report', (e) => {
-    const data = JSON.parse(e.data);
-    WF.finalReport = data;
-    // Now that we have a report, make the right pane visible
-    wfApplyLayoutClass();
-    wfRenderReport(data);
-  });
-
-  // Track whether any step / error has marked the run as failed —
-  // used so ``done`` can flip the header to the correct final state.
-  let runHadError = false;
-
-  es.addEventListener('error', (e) => {
+  const timer = setInterval(async () => {
     try {
-      const data = JSON.parse(e.data);
-      wfAppendThought('⚠ ' + (data.message || 'error'), 'error');
-      runHadError = true;
-    } catch { /* ignore */ }
-  });
+      const res = await fetch(`/api/wf/poll/${runId}?since=${cursor}`);
+      if (!res.ok) {
+        clearInterval(timer);
+        wfAppendThought(`Poll error: HTTP ${res.status}`, 'error');
+        wfUpdateRunHeader('Failed', 'wf-run-dot--error');
+        return;
+      }
+      const data = await res.json();
+      cursor = data.next || cursor;
 
-  es.addEventListener('done', () => {
-    es.close();
-    wfUpdateRunHeader(
-      runHadError ? 'Failed' : 'Completed',
-      runHadError ? 'wf-run-dot--error' : 'wf-run-dot--done',
-    );
-    wfScrollToBottom();
-  });
+      // Process every new event exactly like the old SSE handler
+      for (const evt of (data.events || [])) {
+        switch (evt.type) {
+          case 'workflow_start':
+            wfAppendThought(`Starting (${evt.payload?.mode || 'auto'} mode)…`);
+            break;
+          case 'step_start':
+            wfAppendStepStart(evt.payload);
+            break;
+          case 'step_result':
+            wfAppendStepResult(evt.payload);
+            break;
+          case 'agent_thought':
+            wfAppendThought(evt.payload?.text || '');
+            break;
+          case 'final_report':
+            WF.finalReport = evt.payload;
+            wfApplyLayoutClass();
+            wfRenderReport(evt.payload);
+            break;
+          case 'error':
+            wfAppendThought('⚠ ' + (evt.payload?.message || 'error'), 'error');
+            hadError = true;
+            break;
+          case 'done':
+            // Will be handled below after the loop
+            break;
+        }
+      }
 
-  es.onerror = () => {
-    es.close();
-    wfAppendThought('Connection closed.', 'error');
-  };
+      // Done? Stop polling and finalize the header.
+      if (data.done) {
+        clearInterval(timer);
+        wfUpdateRunHeader(
+          hadError ? 'Failed' : 'Completed',
+          hadError ? 'wf-run-dot--error' : 'wf-run-dot--done',
+        );
+        wfScrollToBottom();
+      }
+    } catch (err) {
+      // Network error — keep trying unless the run is done
+      console.warn('WF poll error:', err);
+    }
+  }, 1000);  // Poll every 1 second
 }
 
 /* ─────────────────────────────────────────────────────────────────
