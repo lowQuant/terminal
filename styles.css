@@ -398,7 +398,7 @@ body {
   flex-shrink: 0;
   border-bottom: 1px solid var(--border-primary);
   background: var(--bg-secondary);
-  height: 46px;
+  height: 60px;
   overflow: hidden;
 }
 
