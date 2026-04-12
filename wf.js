@@ -427,8 +427,13 @@ function wfShowRunPanel(workflowId) {
         `).join('')}
       </div>
       <div class="wf-run-controls">
+        <select class="wf-mode-select" id="wf-mode-select" title="Execution mode">
+          <option value="auto">Auto (agent if available)</option>
+          <option value="agentic">Agentic (requires API key)</option>
+          <option value="scripted">Scripted (no LLM)</option>
+        </select>
         <button class="wf-btn wf-btn--primary wf-run-btn">
-          ▶ Run workflow
+          ▶ Run
         </button>
         <button class="wf-btn wf-btn--secondary wf-edit-btn" style="margin-left:8px">
           ✎ Edit
@@ -436,6 +441,18 @@ function wfShowRunPanel(workflowId) {
       </div>
     </div>
   `;
+
+  // Pre-select the mode based on whether the user has keys configured
+  const modeSelect = stream.querySelector('#wf-mode-select');
+  const userKeys = window.User?.llm_keys || {};
+  const hasKey = userKeys.provider && userKeys[userKeys.provider];
+  if (hasKey && WF.agentic) {
+    modeSelect.value = 'agentic';
+  } else if (hasKey) {
+    modeSelect.value = 'auto';
+  } else {
+    modeSelect.value = 'scripted';
+  }
 
   stream.querySelector('.wf-run-btn').addEventListener('click', () => {
     const inputValues = {};
@@ -445,7 +462,8 @@ function wfShowRunPanel(workflowId) {
       if (/^-?\d+$/.test(v)) v = parseInt(v, 10);
       inputValues[k] = v;
     });
-    wfStartRun(wf.id, inputValues, wf);
+    const mode = modeSelect.value;
+    wfStartRun(wf.id, inputValues, wf, null, mode);
   });
   stream.querySelector('.wf-edit-btn').addEventListener('click', () => wfOpenEditor(wf.id));
 }
@@ -726,7 +744,7 @@ function wfShowPlaceholder() {
    Run start + SSE stream
    ───────────────────────────────────────────────────────────────── */
 
-async function wfStartRun(workflowId, inputs, wfMeta, adHocSpec = null) {
+async function wfStartRun(workflowId, inputs, wfMeta, adHocSpec = null, mode = 'auto') {
   WF.workflowName = wfMeta?.name || workflowId;
   WF.focus = wfMeta?.focus || '';
   WF.renderedSteps = {};
@@ -737,8 +755,8 @@ async function wfStartRun(workflowId, inputs, wfMeta, adHocSpec = null) {
   wfApplyLayoutClass();
 
   const body = adHocSpec
-    ? { workflow: adHocSpec, inputs, mode: 'auto' }
-    : { workflow_id: workflowId, inputs, mode: 'auto' };
+    ? { workflow: adHocSpec, inputs, mode }
+    : { workflow_id: workflowId, inputs, mode };
 
   if (window.User?.llm_keys) body.llm_keys = window.User.llm_keys;
 

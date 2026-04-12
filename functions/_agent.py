@@ -207,10 +207,26 @@ def build_scripted_report(
             lines.append(f"- **{label}** — {r.summary}")
 
     lines.append("")
-    lines.append(
-        "_Scripted run — no LLM analysis. Set `ANTHROPIC_API_KEY` to "
-        "enable agentic synthesis._"
-    )
+
+    # Explain why we're in scripted mode so the user can fix it
+    try:
+        import litellm  # noqa: F401
+        litellm_ok = True
+    except ImportError:
+        litellm_ok = False
+
+    if not litellm_ok:
+        lines.append(
+            "_Scripted run — `litellm` is not installed on the server. "
+            "Install it with `pip install litellm` and reload the web app "
+            "to enable agentic (LLM-driven) synthesis._"
+        )
+    else:
+        lines.append(
+            "_Scripted run — no API key found for the selected provider. "
+            "Open **⚙ Settings**, pick a provider, paste your key, and "
+            "re-run to get LLM-driven analysis._"
+        )
     return "\n".join(lines)
 
 
@@ -313,8 +329,10 @@ def run_workflow_agentic(
     is_available, model, api_key = _get_agent_config(llm_keys)
     if not is_available:
         emit("agent_thought", {
-            "text": "Agentic mode unavailable — no API Keys set or "
-                    "`litellm` not installed. Falling back to scripted mode.",
+            "text": f"Agentic mode unavailable — "
+                    f"{'litellm not installed on the server' if not is_available else 'no API key for the selected provider'}. "
+                    f"Falling back to scripted mode. "
+                    f"Open ⚙ Settings to configure a provider + key.",
         })
         return run_workflow_scripted(wf, inputs, emit)
 
