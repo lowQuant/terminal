@@ -313,15 +313,21 @@ def agent_status():
     report whether the **server side** is capable of running agentic
     mode at all.
     """
+    # Check if the openai SDK is available — it covers OpenAI,
+    # OpenRouter, Perplexity, and Gemini. Anthropic uses its own SDK.
+    sdk_ok = False
     try:
-        import litellm  # noqa: F401
-        litellm_ok = True
+        import openai  # noqa: F401
+        sdk_ok = True
     except ImportError:
-        litellm_ok = False
+        try:
+            import anthropic  # noqa: F401
+            sdk_ok = True
+        except ImportError:
+            pass
 
     return jsonify({
-        "agentic": litellm_ok,
-        "litellm": litellm_ok,
+        "agentic": sdk_ok,
         "providers": ["anthropic", "openai", "gemini", "perplexity", "openrouter"],
         "default_model": os.environ.get("WF_AGENT_MODEL", "claude-3-5-sonnet-20241022"),
     })

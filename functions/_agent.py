@@ -215,17 +215,18 @@ def build_scripted_report(
     lines.append("")
 
     # Explain why we're in scripted mode so the user can fix it
-    try:
-        import litellm  # noqa: F401
-        litellm_ok = True
-    except ImportError:
-        litellm_ok = False
+    sdk_missing = False
+    for sdk_name in ("openai", "anthropic"):
+        try:
+            __import__(sdk_name)
+        except ImportError:
+            sdk_missing = True
 
-    if not litellm_ok:
+    if sdk_missing:
         lines.append(
-            "_Scripted run — `litellm` is not installed on the server. "
-            "Install it with `pip install litellm` and reload the web app "
-            "to enable agentic (LLM-driven) synthesis._"
+            "_Scripted run — the `openai` and/or `anthropic` package is not "
+            "installed on the server. Install with `pip install openai` "
+            "and reload the web app to enable agentic synthesis._"
         )
     else:
         lines.append(
@@ -240,31 +241,34 @@ def build_scripted_report(
 # Agentic mode — LLM tool-use loop via litellm
 # ═══════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════
+# Provider configuration
+#
+# Direct SDK calls — no litellm dependency. The ``openai`` package
+# (~5MB) covers OpenAI, OpenRouter, Perplexity, and Gemini because
+# they all expose OpenAI-compatible endpoints. The ``anthropic``
+# package is used for direct Anthropic access. Total footprint is
+# ~10MB vs litellm's ~60MB+ dep tree that blows PA's disk quota.
+# ═══════════════════════════════════════════════════════════════════
+
+# Provider → (base_url, sdk). "openai" means use the openai SDK.
+# base_url=None means the default for that SDK (api.openai.com for
+# openai, api.anthropic.com for anthropic).
+PROVIDER_CONFIG = {
+    "openai":     {"base_url": None,                                       "sdk": "openai"},
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1",            "sdk": "openai"},
+    "perplexity": {"base_url": "https://api.perplexity.ai",               "sdk": "openai"},
+    "gemini":     {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "sdk": "openai"},
+    "anthropic":  {"base_url": None,                                       "sdk": "anthropic"},
+}
+
+
 def _get_agent_config(
     llm_keys: Optional[Dict[str, str]] = None,
-) -> tuple[bool, str, str]:
-    """Resolve (is_available, litellm_model, api_key) from user settings.
+) -> tuple[bool, str, str, str]:
+    """Resolve (is_available, model, api_key, provider) from user settings.
 
-    Routing is **explicit** — we use ``llm_keys["provider"]`` to pick
-    which key to use, not substring matching on the model name. The
-    substring approach was fragile: ``openrouter/anthropic/claude-3.5``
-    matched ``"claude"`` first and grabbed the wrong key.
-
-    Expected ``llm_keys`` shape::
-
-        {
-            "provider":    "openrouter",              # which provider to use
-            "agent_model": "anthropic/claude-3.5-sonnet",  # within that provider
-            "anthropic":   "sk-ant-...",
-            "openai":      "sk-...",
-            "gemini":      "AIza...",
-            "perplexity":  "pplx-...",
-            "openrouter":  "sk-or-v1-...",
-        }
-
-    Backward compat: if ``provider`` is missing, we infer it from the
-    model string using **ordered** checks — ``openrouter/`` first, so
-    OpenRouter-hosted Claude models don't get routed to Anthropic.
+    Returns a 4-tuple so the caller knows which provider SDK to use.
     """
     llm_keys = llm_keys or {}
 
@@ -275,7 +279,6 @@ def _get_agent_config(
     )
 
     if not provider:
-        # Infer — order matters: OpenRouter must win over substring matches
         if raw_model.startswith("openrouter/"):
             provider = "openrouter"
         elif raw_model.startswith("gemini/") or "gemini" in raw_model.lower():
@@ -287,19 +290,17 @@ def _get_agent_config(
         elif "gpt" in raw_model.lower() or raw_model.lower().startswith("o1"):
             provider = "openai"
         else:
-            provider = "anthropic"
+            provider = "openai"
 
-    # 2. Shape the model string for litellm's naming convention
+    # 2. Model name — strip any litellm-era prefixes so we pass the
+    #    clean model ID to each SDK
     model = raw_model
-    if provider == "openrouter" and not model.startswith("openrouter/"):
-        model = f"openrouter/{model}"
-    elif provider == "gemini" and not model.startswith("gemini/"):
-        model = f"gemini/{model}"
-    elif provider == "perplexity" and not model.startswith("perplexity/"):
-        # litellm routes perplexity via the perplexity/ prefix
-        model = f"perplexity/{model}"
+    for prefix in ("openrouter/", "gemini/", "perplexity/"):
+        if model.startswith(prefix) and provider != "openrouter":
+            model = model[len(prefix):]
+            break
 
-    # 3. Pull the right key — provider-specific, no cross-contamination
+    # 3. Pull the right key
     key_map = {
         "anthropic":  ("anthropic",  "ANTHROPIC_API_KEY"),
         "openai":     ("openai",     "OPENAI_API_KEY"),
@@ -307,18 +308,179 @@ def _get_agent_config(
         "perplexity": ("perplexity", "PERPLEXITY_API_KEY"),
         "openrouter": ("openrouter", "OPENROUTER_API_KEY"),
     }
-    settings_key, env_key = key_map.get(provider, ("anthropic", "ANTHROPIC_API_KEY"))
+    settings_key, env_key = key_map.get(provider, ("openai", "OPENAI_API_KEY"))
     api_key = (llm_keys.get(settings_key) or "").strip() or os.environ.get(env_key, "")
 
-    # 4. Check litellm is installed; only then mark the config as usable
+    # 4. Check the right SDK is importable
+    cfg = PROVIDER_CONFIG.get(provider, PROVIDER_CONFIG["openai"])
+    sdk = cfg["sdk"]
     try:
-        import litellm  # noqa: F401
-        litellm_ok = True
+        if sdk == "openai":
+            import openai  # noqa: F401
+        else:
+            import anthropic  # noqa: F401
+        sdk_ok = True
     except ImportError:
-        litellm_ok = False
+        sdk_ok = False
 
-    is_available = bool(api_key) and litellm_ok
-    return is_available, model, api_key
+    is_available = bool(api_key) and sdk_ok
+    return is_available, model, api_key, provider
+
+
+def _llm_completion(
+    provider: str,
+    model: str,
+    api_key: str,
+    messages: List[Dict[str, Any]],
+    tools: Optional[List[Dict[str, Any]]] = None,
+    max_tokens: int = 2048,
+) -> Dict[str, Any]:
+    """Unified completion call — routes to the right SDK.
+
+    Returns a normalized dict::
+
+        {
+            "content": str | None,          # text response
+            "tool_calls": [                 # may be empty
+                {"id": str, "name": str, "arguments": str},
+            ],
+            "stop_reason": "stop" | "tool_use",
+        }
+    """
+    cfg = PROVIDER_CONFIG.get(provider, PROVIDER_CONFIG["openai"])
+
+    if cfg["sdk"] == "anthropic":
+        return _call_anthropic(api_key, model, messages, tools, max_tokens)
+    else:
+        return _call_openai_compat(cfg["base_url"], api_key, model,
+                                   messages, tools, max_tokens)
+
+
+def _call_openai_compat(base_url, api_key, model, messages, tools, max_tokens):
+    """Call any OpenAI-compatible API (OpenAI, OpenRouter, Perplexity, Gemini)."""
+    from openai import OpenAI
+
+    kwargs: Dict[str, Any] = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+
+    client = OpenAI(**kwargs)
+
+    call_args: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }
+    if tools:
+        call_args["tools"] = tools
+
+    resp = client.chat.completions.create(**call_args)
+    msg = resp.choices[0].message
+
+    tool_calls = []
+    if msg.tool_calls:
+        for tc in msg.tool_calls:
+            tool_calls.append({
+                "id": tc.id,
+                "name": tc.function.name,
+                "arguments": tc.function.arguments,
+            })
+
+    return {
+        "content": msg.content or "",
+        "tool_calls": tool_calls,
+        "stop_reason": "tool_use" if tool_calls else "stop",
+    }
+
+
+def _call_anthropic(api_key, model, messages, tools, max_tokens):
+    """Call Anthropic's native API with tool use."""
+    from anthropic import Anthropic
+
+    client = Anthropic(api_key=api_key)
+
+    # Anthropic expects system as a separate param, not in messages.
+    # Also uses a different tool schema shape.
+    system = ""
+    filtered_msgs = []
+    for m in messages:
+        if m.get("role") == "system":
+            system = m.get("content", "")
+        else:
+            filtered_msgs.append(m)
+
+    # Convert OpenAI tool format to Anthropic format
+    anthropic_tools = []
+    if tools:
+        for t in tools:
+            fn = t.get("function", {})
+            anthropic_tools.append({
+                "name": fn.get("name"),
+                "description": fn.get("description"),
+                "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
+            })
+
+    # Convert tool_call / tool messages to Anthropic format
+    converted_msgs: List[Dict[str, Any]] = []
+    for m in filtered_msgs:
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            # Anthropic uses content blocks
+            content_blocks: List[Any] = []
+            if m.get("content"):
+                content_blocks.append({"type": "text", "text": m["content"]})
+            for tc in m["tool_calls"]:
+                import json as _json
+                content_blocks.append({
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "input": _json.loads(tc["arguments"]) if isinstance(tc["arguments"], str) else tc["arguments"],
+                })
+            converted_msgs.append({"role": "assistant", "content": content_blocks})
+        elif role == "tool":
+            # Anthropic uses tool_result inside a user message
+            converted_msgs.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": m.get("tool_call_id"),
+                    "content": m.get("content", ""),
+                }],
+            })
+        else:
+            converted_msgs.append(m)
+
+    call_args: Dict[str, Any] = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": converted_msgs,
+    }
+    if system:
+        call_args["system"] = system
+    if anthropic_tools:
+        call_args["tools"] = anthropic_tools
+
+    resp = client.messages.create(**call_args)
+
+    content_text = ""
+    tool_calls = []
+    for block in resp.content:
+        if getattr(block, "type", None) == "text":
+            content_text += getattr(block, "text", "")
+        elif getattr(block, "type", None) == "tool_use":
+            import json as _json
+            tool_calls.append({
+                "id": block.id,
+                "name": block.name,
+                "arguments": _json.dumps(block.input),
+            })
+
+    return {
+        "content": content_text,
+        "tool_calls": tool_calls,
+        "stop_reason": "tool_use" if resp.stop_reason == "tool_use" else "stop",
+    }
 
 
 def run_workflow_agentic(
@@ -328,30 +490,26 @@ def run_workflow_agentic(
     max_turns: int = 12,
     llm_keys: Optional[Dict[str, str]] = None,
 ) -> Dict[str, FunctionResult]:
-    """Run a workflow through an LLM as a tool-use loop."""
+    """Run a workflow through an LLM as a tool-use loop.
+
+    Uses direct SDK calls (openai or anthropic package) — no litellm.
+    """
     import json
 
-    # Check availability BEFORE importing litellm — the import itself
-    # crashes on hosts where the package isn't installed, which used to
-    # propagate as an uncaught "Workflow runtime error" even though the
-    # fallback path (scripted mode) doesn't need litellm at all.
-    is_available, model, api_key = _get_agent_config(llm_keys)
+    is_available, model, api_key, provider = _get_agent_config(llm_keys)
     if not is_available:
-        # Explain exactly why and fall back gracefully
+        cfg = PROVIDER_CONFIG.get(provider, PROVIDER_CONFIG["openai"])
+        sdk = cfg["sdk"]
         try:
-            import litellm  # noqa: F401
+            __import__(sdk)
             reason = "no API key for the selected provider"
         except ImportError:
-            reason = "litellm is not installed on the server"
+            reason = f"`{sdk}` package not installed on the server (pip install {sdk})"
         emit("agent_thought", {
             "text": f"Agentic mode unavailable — {reason}. "
-                    f"Falling back to scripted mode. "
-                    f"Open ⚙ Settings to configure a provider + key.",
+                    f"Falling back to scripted mode.",
         })
         return run_workflow_scripted(wf, inputs, emit)
-
-    # Only import litellm after confirming it's available
-    import litellm  # noqa: F811
 
     emit("workflow_start", {
         "workflow": wf.to_summary_json(),
@@ -372,14 +530,15 @@ def run_workflow_agentic(
 
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
+        {"role": "user", "content": user_prompt},
     ]
     results: Dict[str, FunctionResult] = {}
     step_counter = 0
 
     for _turn in range(max_turns):
         try:
-            response = litellm.completion(
+            resp = _llm_completion(
+                provider=provider,
                 model=model,
                 api_key=api_key,
                 messages=messages,
@@ -387,25 +546,25 @@ def run_workflow_agentic(
                 max_tokens=2048,
             )
         except Exception as e:  # noqa: BLE001
-            emit("error", {"message": f"LLM API error ({model}): {e}"})
+            emit("error", {"message": f"LLM API error ({provider}/{model}): {e}"})
             return results
 
-        # litellm.completion returns a ModelResponse (sync) here because
-        # we don't pass stream=True. Pyright sees the union with the
-        # streaming wrapper and can't narrow — so cast to Any.
-        response_any: Any = response
-        msg = response_any.choices[0].message
+        content = resp.get("content") or ""
+        tool_calls = resp.get("tool_calls") or []
 
-        # Append the assistant's message safely
-        dumped_msg = msg.model_dump()
-        messages.append(dumped_msg)
+        if content.strip():
+            emit("agent_thought", {"text": content})
 
-        if msg.content and msg.content.strip():
-            emit("agent_thought", {"text": msg.content})
+        # Build the assistant message for the transcript
+        assistant_msg: Dict[str, Any] = {"role": "assistant", "content": content}
+        if tool_calls:
+            assistant_msg["tool_calls"] = tool_calls
+        messages.append(assistant_msg)
 
-        if not msg.tool_calls:
+        # Terminal: no tool calls → model is done
+        if not tool_calls:
             emit("final_report", {
-                "text": msg.content or "",
+                "text": content,
                 "steps": [
                     {"step_id": k, "result": v.to_json()}
                     for k, v in results.items()
@@ -413,28 +572,26 @@ def run_workflow_agentic(
             })
             return results
 
-        # Execute tools
-        for tool_call in msg.tool_calls:
+        # Execute each tool call
+        for tc in tool_calls:
             step_counter += 1
-            tool_name = tool_call.function.name or "unknown"
+            tool_name = tc.get("name", "unknown")
             try:
-                tool_input = json.loads(tool_call.function.arguments)
+                tool_input = json.loads(tc["arguments"]) if isinstance(tc["arguments"], str) else (tc["arguments"] or {})
             except Exception:
                 tool_input = {}
 
-            tool_use_id = tool_call.id
             step_id = f"t{step_counter}_{tool_name}"
-            
             emit("step_start", {
                 "step_id": step_id,
                 "tool": tool_name,
                 "params": tool_input,
                 "label": tool_name,
             })
-            
+
             result = run_tool(tool_name, **tool_input)
             results[step_id] = result
-            
+
             emit("step_result", {
                 "step_id": step_id,
                 "result": result.to_json(),
@@ -442,9 +599,9 @@ def run_workflow_agentic(
 
             messages.append({
                 "role": "tool",
-                "tool_call_id": tool_use_id,
+                "tool_call_id": tc.get("id", ""),
                 "name": tool_name,
-                "content": _format_tool_result(result)
+                "content": _format_tool_result(result),
             })
 
     emit("error", {"message": "Agent hit max_turns without a final report"})
@@ -527,7 +684,7 @@ def run_workflow(
     set_run_context(user_context or {})
 
     try:
-        is_available, _, _ = _get_agent_config(llm_keys)
+        is_available, _, _, _ = _get_agent_config(llm_keys)
         if mode == "scripted" or (mode == "auto" and not is_available):
             results = run_workflow_scripted(wf, inputs, emit)
             report = build_scripted_report(wf, inputs, results)
@@ -554,10 +711,9 @@ def run_workflow(
 
 def nl_to_workflow(text: str, llm_keys: Optional[Dict[str, str]] = None) -> Optional[Workflow]:
     """Ask an LLM to turn a natural-language request into a workflow spec."""
-    is_available, model, api_key = _get_agent_config(llm_keys)
+    is_available, model, api_key, provider = _get_agent_config(llm_keys)
     if not is_available:
         return None
-    import litellm  # noqa: F811 — only imported after confirming available
 
     tool_catalog = "\n".join(
         f"- {spec.name}: {spec.description}"
@@ -579,17 +735,17 @@ def nl_to_workflow(text: str, llm_keys: Optional[Dict[str, str]] = None) -> Opti
         "Use only the tools listed. Do not invent tools."
     )
     try:
-        resp = litellm.completion(
+        resp = _llm_completion(
+            provider=provider,
             model=model,
             api_key=api_key,
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": text}
+                {"role": "user", "content": text},
             ],
             max_tokens=1024,
         )
-        resp_any: Any = resp
-        raw = resp_any.choices[0].message.content or ""
+        raw = resp.get("content") or ""
         # Strip markdown fences if present
         if raw.startswith("```"):
             raw = raw.strip("`")
