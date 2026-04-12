@@ -209,10 +209,32 @@
         <div class="recent-dropdown" id="recent-dropdown"></div>
       </div>
 
-      <!-- Header Info -->
+      <!-- Header Info (desktop) -->
       <div class="header__info">
         <div class="live-dot"></div>
         <span class="header__clock" id="header-clock">--:--:--</span>
+      </div>
+
+      <!-- Burger Menu (mobile only) -->
+      <button class="header__burger" id="burger-btn" title="Menu">
+        <span class="header__burger-line"></span>
+        <span class="header__burger-line"></span>
+        <span class="header__burger-line"></span>
+      </button>
+
+      <!-- Mobile Menu Dropdown -->
+      <div class="mobile-menu" id="mobile-menu">
+        <div class="mobile-menu__user">
+          <span class="mobile-menu__name" id="mobile-user-name"></span>
+        </div>
+        <div class="mobile-menu__clock">
+          <div class="live-dot"></div>
+          <span id="mobile-clock">--:--:--</span>
+        </div>
+        <div class="mobile-menu__actions">
+          <button class="mobile-menu__btn" id="mobile-settings-btn" title="Settings">⚙ Settings</button>
+          <button class="mobile-menu__btn mobile-menu__btn--danger" id="mobile-logout-btn" title="Sign out">Sign Out</button>
+        </div>
       </div>
     </header>
 
