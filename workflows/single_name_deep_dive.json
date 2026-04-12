@@ -1,0 +1,82 @@
+{
+  "name": "Single-Name Deep Dive",
+  "description": "Full stack analysis for one ticker — fundamentals, recent price action, realized vol, options skew, and the news flow driving it. Use this before taking a new position or re-sizing an existing one.\n",
+  "focus": "Tie together valuation (is it expensive?), price action (has it run?), options positioning (what's priced in?), and news flow (why?). Highlight any divergence between narrative and price, and whether the options market is pricing the same catalyst story as the headlines suggest.\n",
+  "inputs": {
+    "symbol": {
+      "type": "string",
+      "required": true
+    },
+    "period": {
+      "type": "string",
+      "default": "3mo"
+    }
+  },
+  "steps": [
+    {
+      "id": "fundamentals",
+      "tool": "DES",
+      "label": "Company snapshot",
+      "parallel_group": "context",
+      "params": {
+        "symbol": "{{inputs.symbol}}"
+      }
+    },
+    {
+      "id": "financials",
+      "tool": "FA",
+      "label": "Financial ratios",
+      "parallel_group": "context",
+      "params": {
+        "symbol": "{{inputs.symbol}}"
+      }
+    },
+    {
+      "id": "price",
+      "tool": "GP",
+      "label": "Price history",
+      "parallel_group": "context",
+      "params": {
+        "symbol": "{{inputs.symbol}}",
+        "period": "{{inputs.period}}"
+      }
+    },
+    {
+      "id": "news",
+      "tool": "CN",
+      "label": "Recent news",
+      "parallel_group": "context",
+      "params": {
+        "symbol": "{{inputs.symbol}}",
+        "limit": 8
+      }
+    },
+    {
+      "id": "skew",
+      "tool": "IVOL",
+      "label": "Vol surface",
+      "depends_on": [
+        "fundamentals"
+      ],
+      "params": {
+        "symbol": "{{inputs.symbol}}"
+      }
+    },
+    {
+      "id": "chain",
+      "tool": "OMON",
+      "label": "Near-dated chain",
+      "depends_on": [
+        "fundamentals"
+      ],
+      "params": {
+        "symbol": "{{inputs.symbol}}"
+      }
+    }
+  ],
+  "tags": [
+    "single-name",
+    "options",
+    "deep-dive"
+  ]
+}

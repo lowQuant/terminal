@@ -443,21 +443,34 @@ def load_workflows_from_dir(directory: str) -> Dict[str, Workflow]:
             continue
 
         wf_id, ext = os.path.splitext(fname)
-        try:
-            if ext in (".yaml", ".yml"):
-                if not _HAS_YAML:
-                    print(f"[WF] Skipping {fname}: PyYAML not installed")
-                    continue
-                with open(path, "r", encoding="utf-8") as f:
-                    raw = yaml.safe_load(f) or {}  # type: ignore[name-defined]
-            elif ext == ".json":
-                with open(path, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
-            else:
-                continue
+        if ext not in (".yaml", ".yml", ".json"):
+            continue
 
-            wf = Workflow.from_dict(raw, wf_id)
-            WORKFLOWS[wf_id] = wf
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+
+            raw: Any = None
+            if ext == ".json":
+                raw = json.loads(text)
+            elif _HAS_YAML:
+                raw = yaml.safe_load(text) or {}  # type: ignore[name-defined]
+            else:
+                # PyYAML not available — try JSON parse as a fallback.
+                # Valid JSON is also valid YAML, and many simple YAML
+                # files (no multi-line strings, no anchors) are
+                # coincidentally valid JSON. This fallback means the
+                # terminal works even on hosts where PyYAML isn't
+                # installed (e.g. PythonAnywhere default env).
+                try:
+                    raw = json.loads(text)
+                except json.JSONDecodeError:
+                    print(f"[WF] Skipping {fname}: PyYAML not installed and file is not valid JSON")
+                    continue
+
+            if raw:
+                wf = Workflow.from_dict(raw, wf_id)
+                WORKFLOWS[wf_id] = wf
         except Exception as e:  # noqa: BLE001
             print(f"[WF] Failed to load {fname}: {e}")
 
