@@ -375,6 +375,19 @@ function openFunction(code) {
   if (fn.tabTarget) {
     state.activeFunction = null;
     setActiveTab(fn.tabTarget);
+
+    // Show function badge merged with the security header in the symbol bar
+    const symbolBar = $('#symbol-bar');
+    const fnBadge = $('#symbol-fn-badge');
+    const exchangeEl = $('#symbol-exchange');
+    const dividerEl = $('#symbol-divider');
+    if (symbolBar) symbolBar.style.display = '';
+    if (fnBadge) {
+      fnBadge.innerHTML = `<span class="symbol-bar__fn-code">${fn.code}</span> ${escHtml(fn.name)}`;
+      fnBadge.style.display = '';
+    }
+    if (exchangeEl) exchangeEl.style.display = 'none';
+    if (dividerEl) dividerEl.style.display = 'none';
     return;
   }
 
@@ -3861,19 +3874,110 @@ function toggleWlSplitMode(symbol, mode) {
   if (symbol) {
     let fullSym = `NASDAQ:${symbol}`;
     let name = symbol;
+    let exchange = 'NASDAQ';
     const ws = state.worksheets.find(w => w.id === state.activeWorksheetId);
     if (ws) {
         const t = ws.tickers.find(tk => tk.symbol === symbol);
         if (t) {
-            fullSym = `${t.exchange}:${t.symbol}`;
+            exchange = t.exchange || 'NASDAQ';
+            fullSym = `${exchange}:${t.symbol}`;
             name = t.name;
         }
     }
+
+    // Fast path: if we're already on the watchlist tab, avoid a full re-render.
+    // Instead, update symbol state in-place and only refresh the split pane content.
+    if (state.activeTab === 'watchlist') {
+      const parts = fullSym.split(':');
+      const tvPrefix = parts.length > 1 ? parts[0] : 'NASDAQ';
+      state.currentTicker = parts.length > 1 ? parts[1] : parts[0];
+      state.currentSymbol = `${tvPrefix}:${state.currentTicker}`;
+      state.currentExchange = exchange;
+      state.tvSupported = isTvSupported(state.currentExchange);
+      const TV_CHART_EXCHANGES = [
+        'NASDAQ', 'NYSE', 'AMEX', 'NYSEARCA', 'OTC',
+        'BINANCE', 'COINBASE', 'BITSTAMP', 'FX_IDC', 'FOREXCOM',
+      ];
+      if (!TV_CHART_EXCHANGES.includes(tvPrefix)) {
+        state.tvSupported = false;
+      }
+      state.symbolLoaded = true;
+      state.companyInfo = null;
+      state.newsData = null;
+
+      // Update recent symbols
+      state.recentSymbols = [
+        state.currentSymbol,
+        ...state.recentSymbols.filter((s) => s !== state.currentSymbol),
+      ].slice(0, 20);
+      localStorage.setItem('terminal_recent', JSON.stringify(state.recentSymbols));
+
+      updateSymbolBar(name);
+      updateStatusBar();
+
+      // Update active row highlighting without full re-render
+      document.querySelectorAll('.wl-row').forEach(row => {
+        const sym = row.getAttribute('data-wl-symbol');
+        row.classList.toggle('wl-row--active', sym === symbol);
+      });
+
+      // Refresh only the split pane content (chart/news)
+      wlRefreshSplitPanes();
+      return;
+    }
+
     loadSymbol(fullSym, undefined, name);
     return;
   }
-  
+
   if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+}
+
+// Refresh only the split pane content without rebuilding the full watchlist DOM.
+// This prevents layout shift / flicker when switching tickers.
+function wlRefreshSplitPanes() {
+  destroyLightweightCharts();
+
+  const isMax = state.wlViewMode === 'max';
+  const is1Split = state.wlViewMode === '1-split';
+  const is2Split = state.wlViewMode === '2-split';
+  const isNewsMode = state.wlSplitMode === 'news';
+
+  if (isMax || !state.symbolLoaded) return;
+
+  if (is1Split) {
+    // Update the split panel header title
+    const panelHeader = document.querySelector('.wl-chart-panel .panel__title');
+    if (panelHeader) {
+      const label = isNewsMode ? 'News' : 'Chart';
+      panelHeader.innerHTML = `<span class="panel__title-dot"></span> ${label} \u2014 ${state.currentTicker || 'Select a ticker'}`;
+    }
+    const container = document.getElementById('wl-split-container');
+    if (container) {
+      container.innerHTML = '';
+      if (isNewsMode) {
+        renderNewsListForWl('wl-split-container');
+      } else {
+        injectChart('wl-split-container', state.currentSymbol, state.currentExchange);
+      }
+    }
+  } else if (is2Split) {
+    // Update panel headers
+    const headers = document.querySelectorAll('.wl-chart-panel .panel__title');
+    if (headers[0]) headers[0].innerHTML = `<span class="panel__title-dot"></span> Chart \u2014 ${state.currentTicker || 'Select a ticker'}`;
+    if (headers[1]) headers[1].innerHTML = `<span class="panel__title-dot"></span> News \u2014 ${state.currentTicker || 'Select a ticker'}`;
+
+    const chartContainer = document.getElementById('wl-split-chart-container');
+    const newsContainer = document.getElementById('wl-split-news-container');
+    if (chartContainer) {
+      chartContainer.innerHTML = '';
+      injectChart('wl-split-chart-container', state.currentSymbol, state.currentExchange);
+    }
+    if (newsContainer) {
+      newsContainer.innerHTML = '';
+      renderNewsListForWl('wl-split-news-container');
+    }
+  }
 }
 
 // Inline Editing
@@ -4189,6 +4293,16 @@ function renderOMON(container) {
   container.className = 'dashboard dashboard--function';
   container.innerHTML = `
     <div class="function-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">OMON</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">Options Monitor</div>
+            <div class="function-header__name-sub">Options chain with Greeks &amp; volume — ${escHtml(state.currentTicker || '')}</div>
+          </div>
+        </div>
+      </header>
+
       <div class="function-toolbar">
         <div class="function-toolbar__label">Expiry</div>
         <div class="omon-expiry-pills" id="omon-expiry-pills">
@@ -4497,6 +4611,16 @@ function renderIVOL(container) {
   container.className = 'dashboard dashboard--function';
   container.innerHTML = `
     <div class="function-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">IVOL</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">Options Volatility</div>
+            <div class="function-header__name-sub">Implied volatility smile &amp; skew curves — ${escHtml(state.currentTicker || '')}</div>
+          </div>
+        </div>
+      </header>
+
       <div class="function-toolbar">
         <div class="function-toolbar__label">Expirations</div>
         <div class="omon-expiry-pills" id="ivol-expiry-pills">

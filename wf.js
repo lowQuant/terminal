@@ -83,6 +83,15 @@ async function renderWorkflowHub(container) {
 
   container.className = 'dashboard wf-dashboard';
   container.innerHTML = `
+    <header class="function-header function-header--compact">
+      <div class="function-header__title-row">
+        <div class="function-header__code">WF</div>
+        <div class="function-header__name">
+          <div class="function-header__name-main">Workflows</div>
+          <div class="function-header__name-sub">Agentic research workflows — chain functions with Claude analysis</div>
+        </div>
+      </div>
+    </header>
     <div class="wf-layout" id="wf-layout">
       <aside class="wf-sidebar">
         <div class="wf-collapse-strip" id="wf-left-expand" title="Expand sidebar">
