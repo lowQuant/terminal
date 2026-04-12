@@ -282,6 +282,27 @@ def _normalize_step(s: Dict[str, Any], idx: int) -> Dict[str, Any]:
     return out
 
 
+@wf_bp.route("/api/wf/debug/python")
+def debug_python():
+    """Diagnostic: show which Python the WSGI process is running and
+    what it can import. Hit this URL to debug 'litellm not found'
+    issues on PythonAnywhere."""
+    import sys
+    mods = {}
+    for name in ["litellm", "yaml", "anthropic", "openai"]:
+        try:
+            m = __import__(name)
+            mods[name] = getattr(m, "__version__", "installed (no version)")
+        except ImportError as e:
+            mods[name] = f"NOT FOUND: {e}"
+    return jsonify({
+        "python_executable": sys.executable,
+        "python_version": sys.version,
+        "sys_path": sys.path[:10],
+        "modules": mods,
+    })
+
+
 @wf_bp.route("/api/wf/agent_status")
 def agent_status():
     """Report whether agentic mode is available.

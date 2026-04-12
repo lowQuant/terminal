@@ -324,17 +324,28 @@ def run_workflow_agentic(
 ) -> Dict[str, FunctionResult]:
     """Run a workflow through an LLM as a tool-use loop."""
     import json
-    import litellm
 
+    # Check availability BEFORE importing litellm — the import itself
+    # crashes on hosts where the package isn't installed, which used to
+    # propagate as an uncaught "Workflow runtime error" even though the
+    # fallback path (scripted mode) doesn't need litellm at all.
     is_available, model, api_key = _get_agent_config(llm_keys)
     if not is_available:
+        # Explain exactly why and fall back gracefully
+        try:
+            import litellm  # noqa: F401
+            reason = "no API key for the selected provider"
+        except ImportError:
+            reason = "litellm is not installed on the server"
         emit("agent_thought", {
-            "text": f"Agentic mode unavailable — "
-                    f"{'litellm not installed on the server' if not is_available else 'no API key for the selected provider'}. "
+            "text": f"Agentic mode unavailable — {reason}. "
                     f"Falling back to scripted mode. "
                     f"Open ⚙ Settings to configure a provider + key.",
         })
         return run_workflow_scripted(wf, inputs, emit)
+
+    # Only import litellm after confirming it's available
+    import litellm  # noqa: F811
 
     emit("workflow_start", {
         "workflow": wf.to_summary_json(),
@@ -537,10 +548,10 @@ def run_workflow(
 
 def nl_to_workflow(text: str, llm_keys: Optional[Dict[str, str]] = None) -> Optional[Workflow]:
     """Ask an LLM to turn a natural-language request into a workflow spec."""
-    import litellm
     is_available, model, api_key = _get_agent_config(llm_keys)
     if not is_available:
         return None
+    import litellm  # noqa: F811 — only imported after confirming available
 
     tool_catalog = "\n".join(
         f"- {spec.name}: {spec.description}"
