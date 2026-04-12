@@ -3450,6 +3450,16 @@ body {
   overflow: hidden;
 }
 
+/* ── IMAP heatmap — full-bleed, no panel chrome ── */
+.function-panel--heatmap {
+  border: none;
+  background: transparent;
+}
+.function-panel--heatmap .panel__body {
+  padding: 0;
+  border-radius: 0;
+}
+
 /* ── EVTS Earnings Table ── */
 .evts-loading,
 .evts-empty {

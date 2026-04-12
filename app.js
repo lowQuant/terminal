@@ -363,6 +363,13 @@ const FUNCTIONS = [
     aliases: ['WF', 'WORKFLOW', 'WORKFLOWS', 'AGENT', 'RUN'],
     implemented: true,
   },
+  {
+    code: 'IMAP',
+    name: 'Interactive Heatmaps',
+    desc: 'Stock, ETF, crypto & FX heatmaps with sector/asset breakdowns',
+    aliases: ['IMAP', 'HEATMAP', 'HEATMAPS', 'MAP', 'STOCKMAP', 'ETFMAP', 'FXMAP'],
+    implemented: true,
+  },
   // Bloomberg tab shortcuts — route to stock-context tabs
   {
     code: 'DES',
@@ -487,6 +494,7 @@ function openFunction(code) {
     case 'OMON': renderOMON(dashboard); break;
     case 'IVOL': renderIVOL(dashboard); break;
     case 'WF':   renderWorkflowHub(dashboard); break;
+    case 'IMAP': renderIMAP(dashboard); break;
   }
   updateStatusBar();
 }
@@ -1367,6 +1375,126 @@ function injectTimeline(containerId, feed = 'all_symbols') {
     'https://s3.tradingview.com/external-embedding/embed-widget-timeline.js',
     config
   );
+}
+
+
+// ═══════════════════════════════════════
+// IMAP — Interactive Heatmaps
+// ═══════════════════════════════════════
+//
+// Five TradingView heatmap widgets behind tabs: Stock, ETF, Crypto,
+// FX Cross Rates, FX Heatmap. Each tab destroys the current widget
+// and injects the new one — TradingView embeds don't support
+// dynamic config changes.
+
+const IMAP_TABS = [
+  {
+    id: 'stocks', label: 'Stocks',
+    url: 'https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js',
+    config: {
+      dataSource: 'SPX500', grouping: 'sector',
+      blockSize: 'market_cap_basic', blockColor: 'change',
+      hasTopBar: true, isDataSetEnabled: true,
+      isZoomEnabled: true, hasSymbolTooltip: true,
+    },
+  },
+  {
+    id: 'etfs', label: 'ETFs',
+    url: 'https://s3.tradingview.com/external-embedding/embed-widget-etf-heatmap.js',
+    config: {
+      dataSource: 'AllUSEtf', grouping: 'asset_class',
+      blockSize: 'aum', blockColor: 'change',
+      hasTopBar: true, isDataSetEnabled: true,
+      isZoomEnabled: true, hasSymbolTooltip: true,
+    },
+  },
+  {
+    id: 'crypto', label: 'Crypto',
+    url: 'https://s3.tradingview.com/external-embedding/embed-widget-crypto-coins-heatmap.js',
+    config: {
+      dataSource: 'Crypto', blockSize: 'market_cap_calc',
+      blockColor: 'change', hasTopBar: true,
+      isDataSetEnabled: false, isZoomEnabled: true,
+      hasSymbolTooltip: true,
+    },
+  },
+  {
+    id: 'fx-rates', label: 'FX Rates',
+    url: 'https://s3.tradingview.com/external-embedding/embed-widget-forex-cross-rates.js',
+    config: {
+      currencies: ['EUR', 'USD', 'JPY', 'GBP', 'CHF', 'AUD', 'CAD', 'NZD', 'CNY'],
+    },
+  },
+  {
+    id: 'fx-heatmap', label: 'FX Heatmap',
+    url: 'https://s3.tradingview.com/external-embedding/embed-widget-forex-heat-map.js',
+    config: {
+      currencies: ['EUR', 'USD', 'JPY', 'GBP', 'CHF', 'AUD', 'CAD', 'NZD', 'CNY'],
+    },
+  },
+];
+
+function renderIMAP(container) {
+  container.className = 'dashboard dashboard--function';
+  container.innerHTML = `
+    <div class="function-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">IMAP</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">Interactive Heatmaps</div>
+            <div class="function-header__name-sub">Stock, ETF, crypto &amp; FX heatmaps</div>
+          </div>
+        </div>
+      </header>
+
+      <div class="function-toolbar">
+        <div class="range-filter" id="imap-tabs">
+          ${IMAP_TABS.map((t, i) => `
+            <button class="country-btn ${i === 0 ? 'country-btn--active' : ''}"
+                    data-imap="${t.id}">${t.label}</button>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="panel function-panel function-panel--heatmap">
+        <div class="panel__body" id="imap-widget-container"></div>
+      </div>
+    </div>
+  `;
+
+  // Wire tab clicks
+  document.querySelectorAll('#imap-tabs .country-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#imap-tabs .country-btn').forEach((b) =>
+        b.classList.remove('country-btn--active')
+      );
+      btn.classList.add('country-btn--active');
+      injectImapWidget(btn.dataset.imap);
+    });
+  });
+
+  // Load the default tab
+  injectImapWidget('stocks');
+  setDataSource('TradingView');
+}
+
+function injectImapWidget(tabId) {
+  const tab = IMAP_TABS.find((t) => t.id === tabId);
+  if (!tab) return;
+
+  const containerId = 'imap-widget-container';
+  const el = document.getElementById(containerId);
+  if (el) el.innerHTML = '';
+
+  injectWidget(containerId, tab.url, {
+    ...tab.config,
+    colorTheme: 'dark',
+    isTransparent: true,
+    locale: 'en',
+    width: '100%',
+    height: '100%',
+  });
 }
 
 
