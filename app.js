@@ -3499,12 +3499,13 @@ function renderWatchlist(container) {
     });
   }
 
-  // Worksheet tabs
+  // Worksheet tabs — double-click tab name to rename
   const wsTabs = state.worksheets.map(w => {
     const active = w.id === state.activeWorksheetId;
     return `
       <div class="ws-tab ${active ? 'ws-tab--active' : ''}" onclick="switchWorksheet(${w.id})">
-        <span class="ws-tab__name">${escHtml(w.name)}</span>
+        <span class="ws-tab__name" ondblclick="event.stopPropagation(); wlStartRenameSheet(${w.id})"
+              title="Double-click to rename">${escHtml(w.name)}</span>
         ${state.worksheets.length > 1 ? `<span class="ws-tab__close" onclick="event.stopPropagation(); deleteWorksheet(${w.id})" title="Delete worksheet">&times;</span>` : ''}
       </div>
     `;
@@ -3526,21 +3527,9 @@ function renderWatchlist(container) {
     </tr>
   `;
 
-  // Helper for News Heat bars
-  const renderHeatBars = (heat) => {
-    let bars = 0;
-    if (heat === 'low') bars = 1;
-    if (heat === 'medium') bars = 2;
-    if (heat === 'high') bars = 4; // Simplified to 0,1,2,4 mapping for the request "4 bars from left to right"
-    
-    // Create 4 bars
-    let html = '<div class="heat-bars">';
-    for (let i = 1; i <= 4; i++) {
-        html += `<div class="heat-bar ${i <= bars ? 'heat-bar--active' : ''}"></div>`;
-    }
-    html += '</div>';
-    return html;
-  };
+  // Helper for News Heat bars — delegates to the global function
+  // so both initial render and in-place updates use the same visual
+  const renderHeatBars = wlRenderHeatBars;
 
   const getSortIcon = (col) => {
     if (state.wlSortCol !== col) return '';
@@ -3661,10 +3650,17 @@ function renderWatchlist(container) {
           ${wsTabs}
           <button class="ws-tab ws-tab--add" onclick="addWorksheet()" title="Add worksheet">+</button>
         </div>
-        <div class="wl-toolbar__actions" style="display:flex; background:var(--bg-tertiary); border-radius:var(--radius); border:1px solid var(--border-primary); overflow:hidden;">
-          <button class="wl-split-toggle ${isMax ? 'wl-split-toggle--active' : ''}" onclick="setWlViewMode('max')" style="border-radius:0; border-right:1px solid var(--border-primary); padding:4px 8px;" title="Maximized Table">Max.</button>
-          <button class="wl-split-toggle ${is1Split ? 'wl-split-toggle--active' : ''}" onclick="setWlViewMode('1-split')" style="border-radius:0; border-right:1px solid var(--border-primary); padding:4px 8px;" title="Table + Chart/News">1-Split</button>
-          <button class="wl-split-toggle ${is2Split ? 'wl-split-toggle--active' : ''}" onclick="setWlViewMode('2-split')" style="border-radius:0; padding:4px 8px;" title="Table + Chart + News">2-Split</button>
+        <div class="wl-toolbar__actions" style="display:flex; align-items:center; gap:8px;">
+          <div style="display:flex; background:var(--bg-tertiary); border-radius:var(--radius); border:1px solid var(--border-primary); overflow:hidden;">
+            <button class="wl-split-toggle ${isMax ? 'wl-split-toggle--active' : ''}" onclick="setWlViewMode('max')" style="border-radius:0; border-right:1px solid var(--border-primary); padding:4px 8px;" title="Maximized Table">Max.</button>
+            <button class="wl-split-toggle ${is1Split ? 'wl-split-toggle--active' : ''}" onclick="setWlViewMode('1-split')" style="border-radius:0; border-right:1px solid var(--border-primary); padding:4px 8px;" title="Table + Chart/News">1-Split</button>
+            <button class="wl-split-toggle ${is2Split ? 'wl-split-toggle--active' : ''}" onclick="setWlViewMode('2-split')" style="border-radius:0; padding:4px 8px;" title="Table + Chart + News">2-Split</button>
+          </div>
+          <button class="wl-export-btn" onclick="wlExportCSV()" title="Export to CSV">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -4009,6 +4005,21 @@ function renderTickerTape() {
 // WATCHLIST MANAGEMENT
 // ═══════════════════════════════════════
 
+// Global heat-bars renderer — used by both the initial table render
+// and the in-place update path so the visual stays consistent.
+function wlRenderHeatBars(heat) {
+  let bars = 0;
+  if (heat === 'low') bars = 1;
+  if (heat === 'medium') bars = 2;
+  if (heat === 'high') bars = 4;
+  let html = '<div class="heat-bars">';
+  for (let i = 1; i <= 4; i++) {
+    html += `<div class="heat-bar ${i <= bars ? 'heat-bar--active' : ''}"></div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
 function saveWorksheets() {
   localStorage.setItem('terminal_worksheets', JSON.stringify(state.worksheets));
   localStorage.setItem('terminal_active_ws', String(state.activeWorksheetId));
@@ -4073,6 +4084,85 @@ function renameWorksheet(id, newName) {
     ws.name = newName.trim() || ws.name;
     saveWorksheets();
   }
+}
+
+// ── Sheet rename UI: replace tab name with an input ──
+function wlStartRenameSheet(sheetId) {
+  const ws = state.worksheets.find(w => w.id === sheetId);
+  if (!ws) return;
+  const tabEl = document.querySelector(`.ws-tab--active .ws-tab__name`);
+  if (!tabEl) return;
+
+  const origName = ws.name;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'ws-tab__rename-input';
+  input.value = origName;
+  input.style.cssText = `
+    background: var(--bg-primary, #0a0a0f);
+    border: 1px solid var(--accent, #ff8c00);
+    color: var(--text-primary, #d4d4d4);
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    padding: 2px 6px;
+    width: ${Math.max(60, origName.length * 8)}px;
+    outline: none;
+    border-radius: 2px;
+  `;
+
+  tabEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  const commit = () => {
+    const val = input.value.trim();
+    renameWorksheet(sheetId, val || origName);
+    if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+  };
+
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = origName; input.blur(); }
+  });
+}
+
+// ── CSV export ──
+function wlExportCSV() {
+  const ws = state.worksheets.find(w => w.id === state.activeWorksheetId);
+  if (!ws || !ws.tickers.length) {
+    showToast('Nothing to export');
+    return;
+  }
+
+  const headers = ['Symbol', 'Name', 'Exchange', 'Last', 'Change', 'Change%', 'Volume', 'RelVol', 'MarketCap', 'NewsHeat', 'EarningsDate'];
+  const rows = ws.tickers.map((t) => {
+    const q = state.wlQuoteData[t.symbol] || {};
+    return [
+      t.symbol,
+      `"${(t.name || '').replace(/"/g, '""')}"`,
+      t.exchange || '',
+      q.last != null ? q.last.toFixed(2) : '',
+      q.change != null ? q.change.toFixed(2) : '',
+      q.changePct != null ? q.changePct.toFixed(2) : '',
+      q.volume != null ? q.volume : '',
+      q.relativeVolume != null ? q.relativeVolume.toFixed(2) : '',
+      q.marketCap != null ? q.marketCap : '',
+      q.newsHeat || '',
+      q.earningsDate || '',
+    ].join(',');
+  });
+
+  const csv = [headers.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${ws.name.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function setWlViewMode(mode) {
@@ -4369,14 +4459,11 @@ function wlUpdateTableData() {
     }
     setCellHtml('wl-earnings', earningsHtml);
 
-    // News heat
-    let heatHtml = '';
-    if (q.newsHeat === 'high') {
-      heatHtml = '<span class="wl-heat wl-heat--high" title="High news activity">🔥</span>';
-    } else if (q.newsHeat === 'medium') {
-      heatHtml = '<span class="wl-heat wl-heat--medium" title="Some news activity">●</span>';
-    }
-    setCellHtml('wl-heat', heatHtml);
+    // News heat — use the same heat-bars visualization as the initial render
+    const heat = q.newsHeat || '';
+    const heatBarsHtml = wlRenderHeatBars(heat);
+    setCellHtml('wl-heat', `<div class="heat-wrapper" title="News Heat: ${heat || 'none'}"
+      onclick="event.stopPropagation(); toggleWlSplitMode('${t.symbol}', 'news');">${heatBarsHtml}</div>`);
   });
 }
 

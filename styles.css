@@ -1030,6 +1030,24 @@ body {
   box-shadow: 0 0 4px rgba(255, 153, 0, 0.4);
 }
 
+/* ── Export button (download icon) ── */
+.wl-export-btn {
+  background: transparent;
+  border: 1px solid var(--border-primary, #2a2a33);
+  color: var(--text-tertiary, #6a6f78);
+  padding: 5px 8px;
+  cursor: pointer;
+  border-radius: var(--radius, 3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.wl-export-btn:hover {
+  color: var(--accent, #ff8c00);
+  border-color: var(--accent, #ff8c00);
+}
+
 /* ── Split Panel Toggle ── */
 .wl-split-toggle {
   font-family: var(--font-sans);
