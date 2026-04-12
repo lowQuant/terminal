@@ -359,8 +359,12 @@ def _llm_completion(
 def _call_openai_compat(base_url, api_key, model, messages, tools, max_tokens):
     """Call any OpenAI-compatible API (OpenAI, OpenRouter, Perplexity, Gemini)."""
     from openai import OpenAI
+    import httpx
 
-    kwargs: Dict[str, Any] = {"api_key": api_key}
+    kwargs: Dict[str, Any] = {
+        "api_key": api_key,
+        "timeout": httpx.Timeout(60.0, connect=10.0),  # 60s total, 10s connect
+    }
     if base_url:
         kwargs["base_url"] = base_url
 
