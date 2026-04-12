@@ -1182,7 +1182,14 @@ function renderHome(container) {
 
         <div class="panel home-panel home-panel--news">
           <div class="panel__header">
-            <div class="panel__title"><span class="panel__title-dot"></span> Top News</div>
+            <div class="panel__title"><span class="panel__title-dot"></span> News</div>
+            <div class="home-news-tabs" id="home-news-tabs">
+              <button class="home-news-tab home-news-tab--active" data-feed="all_symbols">Markets</button>
+              <button class="home-news-tab" data-feed="stock">Stocks</button>
+              <button class="home-news-tab" data-feed="crypto">Crypto</button>
+              <button class="home-news-tab" data-feed="forex">Forex</button>
+              <button class="home-news-tab" data-feed="top">Top Stories</button>
+            </div>
           </div>
           <div class="panel__body" id="home-news-feed"></div>
         </div>
@@ -1226,7 +1233,20 @@ function renderHome(container) {
   `;
 
   injectMarketOverview('home-market-overview');
-  injectTimeline('home-news-feed');
+  injectTimeline('home-news-feed', 'all_symbols');
+
+  // News tab switching — re-injects the widget with a new feed
+  document.getElementById('home-news-tabs')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.home-news-tab');
+    if (!btn) return;
+    document.querySelectorAll('.home-news-tab').forEach((t) => t.classList.remove('home-news-tab--active'));
+    btn.classList.add('home-news-tab--active');
+    const feed = btn.dataset.feed;
+    // Clear the current widget and inject the new one
+    const container = document.getElementById('home-news-feed');
+    if (container) container.innerHTML = '';
+    injectTimeline('home-news-feed', feed);
+  });
 }
 
 // ── Home page widget injectors ──
@@ -1318,18 +1338,34 @@ function injectMarketOverview(containerId) {
   );
 }
 
-function injectTimeline(containerId) {
+function injectTimeline(containerId, feed = 'all_symbols') {
+  // TradingView timeline widget supports:
+  //   feedMode: 'all_symbols' → all market news
+  //   feedMode: 'market' + market: 'stock'|'crypto'|'forex'|'index'
+  // The 'top' feed is a shorthand for all_symbols with compact display.
+  const config = {
+    isTransparent: true,
+    displayMode: 'regular',
+    width: '100%',
+    height: '100%',
+    colorTheme: 'dark',
+    locale: 'en',
+  };
+
+  if (feed === 'all_symbols' || feed === 'top') {
+    config.feedMode = 'all_symbols';
+  } else {
+    config.feedMode = 'market';
+    config.market = feed;  // 'stock', 'crypto', 'forex'
+  }
+
+  if (feed === 'top') {
+    config.displayMode = 'compact';  // denser layout for top stories
+  }
+
   injectWidget(containerId,
     'https://s3.tradingview.com/external-embedding/embed-widget-timeline.js',
-    {
-      feedMode: 'all_symbols',
-      isTransparent: true,
-      displayMode: 'regular',
-      width: '100%',
-      height: '100%',
-      colorTheme: 'dark',
-      locale: 'en',
-    }
+    config
   );
 }
 

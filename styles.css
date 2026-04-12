@@ -3123,6 +3123,50 @@ body {
   overflow: hidden;
 }
 
+/* ── News category tabs ── */
+.home-news-tabs {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.home-news-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary, #6a6f78);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.12s;
+}
+
+.home-news-tab:hover {
+  color: var(--text-secondary, #c0c5ce);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.home-news-tab--active {
+  color: var(--accent, #ff8c00);
+  background: rgba(255, 140, 0, 0.1);
+  font-weight: 600;
+}
+
+/* Stack tabs below title on very narrow screens */
+@media (max-width: 500px) {
+  .home-panel--news .panel__header {
+    flex-wrap: wrap;
+  }
+  .home-news-tabs {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 6px;
+    overflow-x: auto;
+  }
+}
+
 /* ── Function Hints ── */
 .home-functions {
   background: var(--bg-secondary);
@@ -3195,7 +3239,9 @@ body {
 @media (max-width: 1100px) {
   .home-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: 800px minmax(400px, auto);
+    /* Chart hidden on mobile → 70% of the old 800px = 560px.
+       Top News matches with the same fixed height. */
+    grid-template-rows: 560px 560px;
   }
 }
 
@@ -3209,7 +3255,8 @@ body {
     grid-template-columns: 1fr;
   }
   .home-grid {
-    grid-template-rows: 700px minmax(300px, auto);
+    /* 70% of old 700px = 490px. Both panels match. */
+    grid-template-rows: 490px 490px;
   }
 }
 
