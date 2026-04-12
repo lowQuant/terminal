@@ -246,13 +246,19 @@ async function wfLoadAgentStatus() {
     const res = await fetch('/api/wf/agent_status');
     const data = await res.json();
     WF.agentic = !!data.agentic;
-    wfUpdateAgentLabel(data.default_model || 'scripted');
   } catch { /* ignore */ }
+
+  // The chip shows the user's configured model regardless of whether
+  // litellm is installed server-side. The user configured it in
+  // Settings — the chip confirms "yes, that's what will be used."
+  // If litellm is missing, the run will fall back to scripted, and
+  // the run header will say so.
+  wfUpdateAgentLabel();
 }
 
 // Called on load AND whenever the user saves their settings (so the
 // chip stays in sync with the current primary-provider selection).
-function wfUpdateAgentLabel(fallback) {
+function wfUpdateAgentLabel() {
   const el = document.getElementById('wf-agent-status');
   if (!el) return;
 
@@ -260,31 +266,29 @@ function wfUpdateAgentLabel(fallback) {
   const provider = keys.provider;
   const model = keys.agent_model;
 
-  // Determine label + status color
   let label, live;
-  if (!WF.agentic) {
-    label = 'scripted';
-    live = false;
-  } else if (provider && model) {
-    // Check the user actually has a key for the selected provider
+  if (provider && model) {
     const providerKey = keys[provider];
-    if (!providerKey) {
-      label = `${provider} · no key`;
-      live = false;
-    } else {
+    if (providerKey) {
+      // User has a provider + key configured — show it as active.
+      // If litellm is missing server-side, the run itself will tell
+      // them; the chip reflects intent, not runtime capability.
       label = wfShortModelLabel(provider, model);
       live = true;
+    } else {
+      label = `${provider} · no key`;
+      live = false;
     }
   } else {
-    label = fallback || 'scripted';
+    label = 'no model set';
     live = false;
   }
 
   el.textContent = label;
   el.className = 'wf-agent-status ' + (live ? 'wf-agent-status--live' : 'wf-agent-status--off');
   el.title = live
-    ? `Active agent: ${provider}/${model}`
-    : 'Runs will use scripted mode. Open ⚙ settings to pick a provider and paste a key.';
+    ? `Agent: ${provider}/${model}`
+    : 'Open ⚙ Settings → pick a provider → paste a key';
 }
 
 function wfShortModelLabel(provider, model) {
