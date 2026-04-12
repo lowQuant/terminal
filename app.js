@@ -3805,7 +3805,7 @@ function renderTickerTape() {
   const widgetDiv = document.createElement('div');
   widgetDiv.className = 'tradingview-widget-container';
   widgetDiv.style.width = '100%';
-  widgetDiv.style.height = '65px';
+  widgetDiv.style.height = '66px';
 
   const innerDiv = document.createElement('div');
   innerDiv.className = 'tradingview-widget-container__widget';
