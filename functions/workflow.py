@@ -104,9 +104,21 @@ def _new_run(workflow: Workflow, inputs: Dict[str, Any]) -> Run:
 @wf_bp.route("/api/wf/list")
 def list_workflows():
     """Return all loaded workflows with their summary metadata."""
+    # If the in-memory registry is empty (e.g. WSGI cold start where the
+    # directory wasn't readable), try a hot reload now — costs nothing
+    # when the dir is already loaded.
+    if not WORKFLOWS:
+        load_workflows_from_dir(WORKFLOWS_DIR)
+
     return jsonify({
         "workflows": [wf.to_summary_json() for wf in WORKFLOWS.values()],
         "count": len(WORKFLOWS),
+        # Diagnostic — remove once PA deployment is confirmed working
+        "_debug": {
+            "workflows_dir": WORKFLOWS_DIR,
+            "dir_exists": os.path.isdir(WORKFLOWS_DIR),
+            "files": os.listdir(WORKFLOWS_DIR) if os.path.isdir(WORKFLOWS_DIR) else [],
+        },
     })
 
 
