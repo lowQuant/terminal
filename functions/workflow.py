@@ -105,19 +105,49 @@ def _new_run(workflow: Workflow, inputs: Dict[str, Any]) -> Run:
 def list_workflows():
     """Return all loaded workflows with their summary metadata."""
     # If the in-memory registry is empty (e.g. WSGI cold start where the
-    # directory wasn't readable), try a hot reload now — costs nothing
-    # when the dir is already loaded.
+    # directory wasn't readable), try a hot reload now.
+    load_errors = []
     if not WORKFLOWS:
         load_workflows_from_dir(WORKFLOWS_DIR)
+        # Still empty? Try loading each file manually and capture errors
+        if not WORKFLOWS and os.path.isdir(WORKFLOWS_DIR):
+            for fname in os.listdir(WORKFLOWS_DIR):
+                if not fname.endswith((".yaml", ".yml")):
+                    continue
+                path = os.path.join(WORKFLOWS_DIR, fname)
+                try:
+                    import yaml  # noqa: F811
+                    with open(path, "r") as f:
+                        yaml.safe_load(f)
+                    load_errors.append({"file": fname, "status": "yaml_parsed_ok_but_not_loaded"})
+                except ImportError:
+                    load_errors.append({"file": fname, "error": "PyYAML not importable"})
+                except Exception as e:
+                    load_errors.append({"file": fname, "error": str(e)})
+
+    # Check yaml availability
+    yaml_ok = False
+    yaml_err = ""
+    try:
+        import yaml  # noqa: F811
+        yaml_ok = True
+    except ImportError as e:
+        yaml_err = str(e)
 
     return jsonify({
         "workflows": [wf.to_summary_json() for wf in WORKFLOWS.values()],
         "count": len(WORKFLOWS),
-        # Diagnostic — remove once PA deployment is confirmed working
         "_debug": {
             "workflows_dir": WORKFLOWS_DIR,
             "dir_exists": os.path.isdir(WORKFLOWS_DIR),
             "files": os.listdir(WORKFLOWS_DIR) if os.path.isdir(WORKFLOWS_DIR) else [],
+            "yaml_importable": yaml_ok,
+            "yaml_error": yaml_err,
+            "load_errors": load_errors,
+            "has_yaml_flag_in_workflow_module": getattr(
+                __import__('functions._workflow', fromlist=['_HAS_YAML']),
+                '_HAS_YAML', 'NOT_FOUND',
+            ),
         },
     })
 
