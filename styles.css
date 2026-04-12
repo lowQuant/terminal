@@ -111,6 +111,7 @@ body {
   border-bottom: 1px solid var(--border-primary);
   flex-shrink: 0;
   z-index: 100;
+  position: relative;
 }
 
 .header__brand {
@@ -251,6 +252,122 @@ body {
   font-weight: 500;
   min-width: 64px;
   text-align: right;
+}
+
+/* ── Burger Menu (mobile only) ── */
+.header__burger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s var(--ease);
+}
+.header__burger:hover {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+.header__burger-line {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: var(--text-secondary);
+  border-radius: 1px;
+  transition: all 0.25s var(--ease);
+}
+.header__burger--open .header__burger-line:nth-child(1) {
+  transform: rotate(45deg) translate(3px, 3px);
+}
+.header__burger--open .header__burger-line:nth-child(2) {
+  opacity: 0;
+}
+.header__burger--open .header__burger-line:nth-child(3) {
+  transform: rotate(-45deg) translate(4px, -4px);
+}
+.header__burger--open .header__burger-line {
+  background: var(--accent);
+}
+
+/* ── Mobile Menu Dropdown ── */
+.mobile-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  padding: 12px 14px;
+  z-index: 200;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  animation: mobileMenuIn 0.2s var(--ease);
+}
+.mobile-menu--visible {
+  display: flex;
+}
+@keyframes mobileMenuIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.mobile-menu__user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-primary);
+}
+.mobile-menu__name {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.mobile-menu__clock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.mobile-menu__actions {
+  display: flex;
+  gap: 8px;
+}
+.mobile-menu__btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s var(--ease);
+}
+.mobile-menu__btn:hover {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mobile-menu__btn--danger:hover {
+  background: var(--red-dim);
+  border-color: var(--red);
+  color: var(--red);
 }
 
 /* ── Live Indicator ── */
@@ -1542,17 +1659,6 @@ body {
     display: none;
   }
 
-  /* User nav: shrink to avoid overlapping header elements */
-  .user-nav {
-    padding: 4px 10px;
-    gap: 6px;
-    max-width: 45vw;
-  }
-  .user-nav__name {
-    max-width: 100px;
-    font-size: 11px;
-  }
-
   /* Header: tighter on tablets */
   .header {
     padding: 6px 10px;
@@ -1605,26 +1711,25 @@ body {
   }
 }
 
-@media (max-width: 600px) {
-  /* User nav: minimal on small phones */
+/* ── Mobile breakpoint: burger menu, hide desktop user-nav ── */
+@media (max-width: 768px) {
+  /* Hide desktop user-nav overlay — burger menu replaces it */
   .user-nav {
-    padding: 4px 8px;
-    gap: 4px;
-    max-width: 55vw;
-  }
-  .user-nav__name {
-    max-width: 70px;
-    font-size: 10px;
-  }
-  .user-nav__logout {
-    font-size: 10px;
-    padding: 3px 6px;
-  }
-  .user-nav__settings {
-    font-size: 12px;
-    padding: 3px 6px;
+    display: none !important;
   }
 
+  /* Show burger button */
+  .header__burger {
+    display: flex;
+  }
+
+  /* Search placeholder shorter on mobile */
+  .search-container__input::placeholder {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 600px) {
   /* Header: compact mobile */
   .header {
     padding: 6px 8px;
@@ -1724,6 +1829,30 @@ body {
   .dashboard {
     padding: 3px;
     gap: 3px;
+  }
+
+  /* Mobile menu: full-width buttons */
+  .mobile-menu__actions {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 400px) {
+  /* Extra small phones: hide brand title, just show logo */
+  .header__title {
+    display: none;
+  }
+  .header__brand {
+    padding-right: 6px;
+    border-right: none;
+  }
+  .search-container__input {
+    font-size: 11px;
+    padding: 5px 10px 5px 28px;
+  }
+  .search-container__icon {
+    left: 8px;
+    font-size: 12px;
   }
 }
 

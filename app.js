@@ -99,9 +99,68 @@ function initTerminal() {
   initKeyboardShortcuts();
   initArticleModal();
   initSymbolBarInput();
+  initBurgerMenu();
   renderTickerTape();
   // Start on the Home page — no ticker loaded until the user searches one.
   setActiveTab('home');
+}
+
+// ═══════════════════════════════════════
+// MOBILE BURGER MENU
+// ═══════════════════════════════════════
+
+function initBurgerMenu() {
+  const burgerBtn = document.getElementById('burger-btn');
+  const mobileMenu = document.getElementById('mobile-menu');
+  if (!burgerBtn || !mobileMenu) return;
+
+  // Sync mobile user name with the desktop user-display-name
+  const desktopName = document.getElementById('user-display-name');
+  const mobileName = document.getElementById('mobile-user-name');
+  if (desktopName && mobileName) {
+    mobileName.textContent = desktopName.textContent;
+    // Keep in sync if it changes later
+    new MutationObserver(() => {
+      mobileName.textContent = desktopName.textContent;
+    }).observe(desktopName, { childList: true, characterData: true, subtree: true });
+  }
+
+  // Toggle burger menu
+  burgerBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = mobileMenu.classList.toggle('mobile-menu--visible');
+    burgerBtn.classList.toggle('header__burger--open', isOpen);
+  });
+
+  // Close menu when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!mobileMenu.contains(e.target) && e.target !== burgerBtn) {
+      mobileMenu.classList.remove('mobile-menu--visible');
+      burgerBtn.classList.remove('header__burger--open');
+    }
+  });
+
+  // Wire mobile settings button → same as desktop
+  const mobileSettingsBtn = document.getElementById('mobile-settings-btn');
+  const desktopSettingsBtn = document.getElementById('settings-btn');
+  if (mobileSettingsBtn && desktopSettingsBtn) {
+    mobileSettingsBtn.addEventListener('click', () => {
+      mobileMenu.classList.remove('mobile-menu--visible');
+      burgerBtn.classList.remove('header__burger--open');
+      desktopSettingsBtn.click();
+    });
+  }
+
+  // Wire mobile logout button → same as desktop
+  const mobileLogoutBtn = document.getElementById('mobile-logout-btn');
+  const desktopLogoutBtn = document.getElementById('logout-btn');
+  if (mobileLogoutBtn && desktopLogoutBtn) {
+    mobileLogoutBtn.addEventListener('click', () => {
+      mobileMenu.classList.remove('mobile-menu--visible');
+      burgerBtn.classList.remove('header__burger--open');
+      desktopLogoutBtn.click();
+    });
+  }
 }
 
 // Legacy fallback: if auth.js is not loaded or Supabase is unconfigured,
@@ -4166,6 +4225,10 @@ function initClock() {
     const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const clockEl = $('#header-clock');
     if (clockEl) clockEl.textContent = time;
+
+    // Also update mobile menu clock
+    const mobileClock = document.getElementById('mobile-clock');
+    if (mobileClock) mobileClock.textContent = time;
 
     const dateEl = $('#status-date');
     if (dateEl)
