@@ -359,11 +359,10 @@ def _llm_completion(
 def _call_openai_compat(base_url, api_key, model, messages, tools, max_tokens):
     """Call any OpenAI-compatible API (OpenAI, OpenRouter, Perplexity, Gemini)."""
     from openai import OpenAI
-    import httpx
 
     kwargs: Dict[str, Any] = {
         "api_key": api_key,
-        "timeout": httpx.Timeout(60.0, connect=10.0),  # 60s total, 10s connect
+        "timeout": 60.0,  # 60 seconds — OpenAI SDK accepts a plain float
     }
     if base_url:
         kwargs["base_url"] = base_url
@@ -541,6 +540,9 @@ def run_workflow_agentic(
 
     for _turn in range(max_turns):
         try:
+            emit("agent_thought", {
+                "text": f"Calling {provider}/{model} (turn {_turn + 1})…",
+            })
             resp = _llm_completion(
                 provider=provider,
                 model=model,
