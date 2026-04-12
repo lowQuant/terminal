@@ -133,15 +133,21 @@ def _run_batch(
         return
 
     import contextvars
-    parent_ctx = contextvars.copy_context()
 
+    # Each thread needs its OWN context copy. A single Context object
+    # can only be entered by one thread at a time — calling .run() on
+    # the same context from multiple threads raises RuntimeError and
+    # silently drops every step after the first.
     with ThreadPoolExecutor(max_workers=min(len(batch), 4)) as pool:
-        futures = {
-            pool.submit(parent_ctx.run, _run_one, step, inputs, results, emit): step
-            for step in batch
-        }
-        for _ in as_completed(futures):
-            pass
+        futures = {}
+        for step in batch:
+            ctx = contextvars.copy_context()
+            futures[pool.submit(ctx.run, _run_one, step, inputs, results, emit)] = step
+        for future in as_completed(futures):
+            exc = future.exception()
+            if exc:
+                step = futures[future]
+                emit("error", {"message": f"Step {step.id} ({step.tool}) failed: {exc}"})
 
 
 def _run_one(

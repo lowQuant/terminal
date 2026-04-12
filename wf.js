@@ -838,8 +838,13 @@ function wfUpdateRunHeader(state, cls) {
 function wfConnectPoll(runId) {
   let cursor = 0;
   let hadError = false;
+  let pollInterval = 300;   // fast initial poll (300ms) — slows to 1s after first events
 
-  const timer = setInterval(async () => {
+  function schedulePoll() {
+    setTimeout(doPoll, pollInterval);
+  }
+
+  async function doPoll() {
     try {
       const res = await fetch(`/api/wf/poll/${runId}?since=${cursor}`);
       if (!res.ok) {
@@ -868,6 +873,10 @@ function wfConnectPoll(runId) {
             break;
           case 'final_report':
             WF.finalReport = evt.payload;
+            // Force the right pane open — the user wants to see the
+            // report immediately, regardless of any prior collapse state
+            WF.rightCollapsed = false;
+            wfSaveLayout();
             wfApplyLayoutClass();
             wfRenderReport(evt.payload);
             break;
@@ -881,20 +890,29 @@ function wfConnectPoll(runId) {
         }
       }
 
+      // Slow down after first events arrive (no need to hammer)
+      if (data.events && data.events.length > 0) {
+        pollInterval = 1000;
+      }
+
       // Done? Stop polling and finalize the header.
       if (data.done) {
-        clearInterval(timer);
         wfUpdateRunHeader(
           hadError ? 'Failed' : 'Completed',
           hadError ? 'wf-run-dot--error' : 'wf-run-dot--done',
         );
         wfScrollToBottom();
+        return; // don't schedule another poll
       }
     } catch (err) {
-      // Network error — keep trying unless the run is done
+      // Network error — keep trying
       console.warn('WF poll error:', err);
     }
-  }, 1000);  // Poll every 1 second
+    schedulePoll();
+  }
+
+  // Kick off the first poll immediately
+  doPoll();
 }
 
 /* ─────────────────────────────────────────────────────────────────
