@@ -733,6 +733,7 @@ async function wfStartRun(workflowId, inputs, wfMeta, adHocSpec = null) {
   WF.stepResults = {};
   WF.finalReport = null;
   WF.followTail = true;
+  WF.runStartedAt = Date.now();
   wfApplyLayoutClass();
 
   const body = adHocSpec
@@ -740,6 +741,21 @@ async function wfStartRun(workflowId, inputs, wfMeta, adHocSpec = null) {
     : { workflow_id: workflowId, inputs, mode: 'auto' };
 
   if (window.User?.llm_keys) body.llm_keys = window.User.llm_keys;
+
+  // Inject per-run user context. The W tool reads this via a
+  // contextvar on the backend, so the LLM never sees the watchlist
+  // as a callable parameter — it's ambient state.
+  const watchlist = (window.state?.watchlist || []).map((t) => ({
+    symbol:   t.symbol,
+    exchange: t.exchange,
+    name:     t.name,
+  }));
+  body.user_context = {
+    watchlist,
+    display_name: window.auth?.user?.user_metadata?.display_name
+      || window.auth?.user?.email
+      || '',
+  };
 
   try {
     const res = await fetch('/api/wf/run', {
@@ -765,12 +781,35 @@ function wfInitStreamUI(wfMeta) {
   stream.innerHTML = `
     <div class="wf-run-active">
       <div class="wf-run-active__header">
-        <span class="wf-run-dot"></span>
-        <span>Running: ${escHtml(wfMeta?.name || 'workflow')}</span>
+        <span class="wf-run-dot" id="wf-run-dot"></span>
+        <span id="wf-run-state">Running</span>
+        <span>·</span>
+        <span>${escHtml(wfMeta?.name || 'workflow')}</span>
+        <span class="wf-run-active__elapsed" id="wf-run-elapsed"></span>
       </div>
       <div id="wf-events" class="wf-events"></div>
     </div>
   `;
+}
+
+// Update the run header to reflect the final state. Called on the
+// SSE ``done`` event (success) or ``error`` (failure). The ``state``
+// arg is a short label — "Completed" or "Failed" — and ``cls`` is
+// the css modifier on the dot so color matches.
+function wfUpdateRunHeader(state, cls) {
+  const dot = document.getElementById('wf-run-dot');
+  const label = document.getElementById('wf-run-state');
+  const elapsed = document.getElementById('wf-run-elapsed');
+  if (dot) {
+    dot.classList.remove('wf-run-dot--done', 'wf-run-dot--error');
+    dot.classList.add(cls);
+  }
+  if (label) label.textContent = state;
+  if (elapsed && WF.runStartedAt) {
+    const ms = Date.now() - WF.runStartedAt;
+    const s = ms / 1000;
+    elapsed.textContent = `(${s < 10 ? s.toFixed(1) : Math.round(s)}s)`;
+  }
 }
 
 function wfConnectSSE(runId) {
@@ -801,17 +840,24 @@ function wfConnectSSE(runId) {
     wfRenderReport(data);
   });
 
+  // Track whether any step / error has marked the run as failed —
+  // used so ``done`` can flip the header to the correct final state.
+  let runHadError = false;
+
   es.addEventListener('error', (e) => {
     try {
       const data = JSON.parse(e.data);
       wfAppendThought('⚠ ' + (data.message || 'error'), 'error');
+      runHadError = true;
     } catch { /* ignore */ }
   });
 
   es.addEventListener('done', () => {
     es.close();
-    const dot = document.querySelector('.wf-run-dot');
-    if (dot) dot.classList.add('wf-run-dot--done');
+    wfUpdateRunHeader(
+      runHadError ? 'Failed' : 'Completed',
+      runHadError ? 'wf-run-dot--error' : 'wf-run-dot--done',
+    );
     wfScrollToBottom();
   });
 

@@ -346,8 +346,23 @@ def openrouter_models():
 def start_run():
     """Start a workflow run.
 
-    Body: ``{"workflow_id": str, "inputs": {...}, "mode": "auto|scripted|agentic"}``
-    For ad-hoc runs the body may pass a full workflow spec under ``workflow``.
+    Body::
+
+        {
+            "workflow_id":  str,               # saved workflow to run
+            "workflow":     {...},             # OR an ad-hoc full spec
+            "inputs":       {...},             # workflow input values
+            "mode":         "auto|scripted|agentic",
+            "llm_keys":     {...},             # per-user provider keys
+            "user_context": {                  # per-run user state
+                "watchlist": [{symbol, exchange, name}, ...],
+                "display_name": "...",
+            }
+        }
+
+    ``user_context`` is forwarded to the agent runtime via a
+    contextvar so tools like ``W`` (Watchlist) can read the user's
+    symbols without exposing them as LLM-visible parameters.
     """
     body = request.get_json(silent=True) or {}
     wf_id: Optional[str] = body.get("workflow_id")
@@ -355,6 +370,7 @@ def start_run():
     inputs: Dict[str, Any] = body.get("inputs") or {}
     mode = body.get("mode", "auto")
     llm_keys: Dict[str, str] = body.get("llm_keys") or {}
+    user_context: Dict[str, Any] = body.get("user_context") or {}
 
     if ad_hoc_spec and isinstance(ad_hoc_spec, dict):
         try:
@@ -372,7 +388,10 @@ def start_run():
 
     def worker():
         try:
-            run_workflow(workflow, inputs, run.emit, mode=mode, llm_keys=llm_keys)
+            run_workflow(
+                workflow, inputs, run.emit,
+                mode=mode, llm_keys=llm_keys, user_context=user_context,
+            )
         except Exception as e:  # noqa: BLE001
             run.emit("error", {"message": str(e)})
             run.emit("done", {})

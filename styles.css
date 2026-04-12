@@ -4385,6 +4385,18 @@ body {
   animation: none;
 }
 
+.wf-run-dot--error {
+  background: #ef5350;
+  box-shadow: 0 0 10px #ef5350;
+  animation: none;
+}
+
+.wf-run-active__elapsed {
+  color: #6a6f78;
+  font-size: 10px;
+  margin-left: 8px;
+}
+
 @keyframes wf-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }

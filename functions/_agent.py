@@ -120,14 +120,24 @@ def _run_batch(
     results: Dict[str, FunctionResult],
     emit: EmitFn,
 ) -> None:
-    """Run a batch of steps — in parallel if len > 1."""
+    """Run a batch of steps — in parallel if len > 1.
+
+    Parallel runs happen in worker threads; contextvars DO NOT
+    propagate to threads automatically. We capture the current
+    context once (which includes the user_context set by
+    ``run_workflow``) and run each worker inside ``ctx.run(...)`` so
+    tools like W can still read ``get_run_context()``.
+    """
     if len(batch) == 1:
         _run_one(batch[0], inputs, results, emit)
         return
 
+    import contextvars
+    parent_ctx = contextvars.copy_context()
+
     with ThreadPoolExecutor(max_workers=min(len(batch), 4)) as pool:
         futures = {
-            pool.submit(_run_one, step, inputs, results, emit): step
+            pool.submit(parent_ctx.run, _run_one, step, inputs, results, emit): step
             for step in batch
         }
         for _ in as_completed(futures):
@@ -461,6 +471,7 @@ def run_workflow(
     emit: EmitFn,
     mode: str = "auto",
     llm_keys: Optional[Dict[str, str]] = None,
+    user_context: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Drive a workflow end-to-end and emit events.
 
@@ -468,7 +479,18 @@ def run_workflow(
       - ``"auto"`` (default): use agentic if LLM is available, else scripted
       - ``"scripted"``: always scripted
       - ``"agentic"``: scripted fallback if LLM unavailable
+
+    ``user_context`` is installed as the per-run contextvar so tools
+    that need user-specific state (watchlist for W, display name,
+    base currency, …) can read it via ``get_run_context()`` without
+    leaking that state into the LLM-visible params_schema.
     """
+    # Install the run context for the whole run — tools read it via
+    # get_run_context(). The contextvar propagates across the main
+    # thread automatically; parallel batches explicitly copy it.
+    from functions._workflow import set_run_context
+    set_run_context(user_context or {})
+
     try:
         is_available, _, _ = _get_agent_config(llm_keys)
         if mode == "scripted" or (mode == "auto" and not is_available):

@@ -67,6 +67,11 @@ const state = {
   _lwCharts: [],
 };
 
+// Expose app state globally so sibling scripts (wf.js) can read things
+// like the active watchlist. Top-level ``const`` is not attached to
+// ``window`` automatically.
+window.state = state;
+
 // ── DOM References ──
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);

@@ -19,14 +19,21 @@ inputs:
 
 steps:
   - id: fundamentals
-    tool: INFO
+    tool: DES
     label: Company snapshot
     parallel_group: context
     params:
       symbol: "{{inputs.symbol}}"
 
+  - id: financials
+    tool: FA
+    label: Financial ratios
+    parallel_group: context
+    params:
+      symbol: "{{inputs.symbol}}"
+
   - id: price
-    tool: HIST
+    tool: GP
     label: Price history
     parallel_group: context
     params:
@@ -34,7 +41,7 @@ steps:
       period: "{{inputs.period}}"
 
   - id: news
-    tool: NEWS
+    tool: CN
     label: Recent news
     parallel_group: context
     params:

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from functions._workflow import FunctionResult, register_tool
+from functions._workflow import FunctionResult, register_tool, get_run_context
 from functions._schema import (
     field,
     resolve_columns,
@@ -320,24 +320,31 @@ def wf_ivol(symbol: str, exchange: str = "") -> FunctionResult:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# INFO — Company fundamentals
+# DES — Description / Company overview
+#
+# Bloomberg's ``DES`` is the "description" function — a company's
+# overview: who they are, sector, size, next catalyst, key ratios.
+# Here it also surfaces as the back-end for the INFO alias so
+# existing workflows that referenced ``INFO`` keep working.
 # ═══════════════════════════════════════════════════════════════════
 
 @register_tool(
-    name="INFO",
+    name="DES",
     description=(
-        "Company fundamentals and key metrics for a ticker. Returns price, "
-        "valuation multiples, margins, earnings dates, and sector info. Use "
-        "as the first step when analyzing a specific company."
+        "Company description, fundamentals and key metrics for a ticker. "
+        "Returns price, valuation multiples, margins, earnings dates, "
+        "sector, and business summary. Use as the first step when "
+        "analyzing a specific company."
     ),
     params_schema={
-        "symbol": {"type": "string", "required": True},
-        "exchange": {"type": "string", "default": ""},
+        "symbol": {"type": "string", "description": "Ticker symbol, e.g. AAPL", "required": True},
+        "exchange": {"type": "string", "description": "Optional exchange prefix (NASDAQ, NYSE, LSE, etc.)", "default": ""},
     },
     category="fundamentals",
     stock_specific=True,
+    aliases=["INFO"],  # back-compat for existing workflows
 )
-def wf_info(symbol: str, exchange: str = "") -> FunctionResult:
+def wf_des(symbol: str, exchange: str = "") -> FunctionResult:
     if not symbol:
         return FunctionResult(error="symbol required", summary="INFO: no symbol")
     payload = _flask_get_json(f"/api/info/{symbol}?exchange={exchange}")
@@ -362,24 +369,30 @@ def wf_info(symbol: str, exchange: str = "") -> FunctionResult:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# NEWS — Recent news
+# CN — Company News
+#
+# Bloomberg's ``CN`` surfaces a ticker's news flow. Here it aliases
+# to ``NEWS`` for back-compat.
 # ═══════════════════════════════════════════════════════════════════
 
 @register_tool(
-    name="NEWS",
+    name="CN",
     description=(
-        "Recent news articles for a ticker with publishers, links, and "
-        "timestamps. Use for qualitative context when investigating a name."
+        "Company News — recent articles for a ticker with publishers, "
+        "links, and timestamps. Use for qualitative context when "
+        "investigating a name or looking for catalysts the numbers "
+        "haven't captured yet."
     ),
     params_schema={
-        "symbol": {"type": "string", "required": True},
-        "limit": {"type": "integer", "default": 10},
+        "symbol": {"type": "string", "description": "Ticker symbol", "required": True},
+        "limit": {"type": "integer", "description": "Max articles (1-30)", "default": 10},
         "exchange": {"type": "string", "default": ""},
     },
     category="news",
     stock_specific=True,
+    aliases=["NEWS"],
 )
-def wf_news(symbol: str, limit: int = 10, exchange: str = "") -> FunctionResult:
+def wf_cn(symbol: str, limit: int = 10, exchange: str = "") -> FunctionResult:
     payload = _flask_get_json(f"/api/news/{symbol}?exchange={exchange}")
     if isinstance(payload, dict) and "error" in payload:
         return FunctionResult(error=payload["error"], summary=f"NEWS {symbol} failed")
@@ -400,25 +413,37 @@ def wf_news(symbol: str, limit: int = 10, exchange: str = "") -> FunctionResult:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# HIST — OHLCV history (for price moves / context)
+# GP — Graph / Price (OHLCV history)
+#
+# Bloomberg's ``GP`` is the price-chart function. We return OHLCV
+# candles + a tail-window pct change + realized vol so the agent can
+# answer "has it already run?" without another request. ``HIST`` is
+# kept as an alias for existing workflows.
 # ═══════════════════════════════════════════════════════════════════
 
 @register_tool(
-    name="HIST",
+    name="GP",
     description=(
-        "Daily OHLCV price history for a ticker. Returns candles plus "
-        "computed percent change and realized volatility over the window. "
-        "Use to contextualize a catalyst — has it already run?"
+        "Graph / Price — daily OHLCV history for a ticker plus computed "
+        "percent change and realized volatility over the window. Use to "
+        "contextualize a catalyst (has it already run?) and to compare "
+        "realized vs implied vol."
     ),
     params_schema={
-        "symbol": {"type": "string", "required": True},
-        "period": {"type": "string", "enum": ["1mo", "3mo", "6mo", "1y"], "default": "3mo"},
+        "symbol": {"type": "string", "description": "Ticker symbol", "required": True},
+        "period": {
+            "type": "string",
+            "description": "Window size",
+            "enum": ["1mo", "3mo", "6mo", "1y"],
+            "default": "3mo",
+        },
         "exchange": {"type": "string", "default": ""},
     },
     category="price",
     stock_specific=True,
+    aliases=["HIST"],
 )
-def wf_hist(symbol: str, period: str = "3mo", exchange: str = "") -> FunctionResult:
+def wf_gp(symbol: str, period: str = "3mo", exchange: str = "") -> FunctionResult:
     payload = _flask_get_json(
         f"/api/history/{symbol}?period={period}&exchange={exchange}"
     )
@@ -575,6 +600,224 @@ def wf_mov(index: str = "SPX", sort: str = "contribution",
                 rows,
                 preferred=["SYMBOL", "NAME", "CHANGE_PCT", "PRICE", "VOLUME", "SECTOR"],
                 fill=True,
+            ),
+            "rows": rows,
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FA — Financial Analysis
+#
+# Bloomberg's ``FA`` is the financial statements + ratio function.
+# The terminal does not yet have a dedicated financials endpoint
+# (noted as "will get a major overhaul" by the product), so for now
+# FA delegates to /api/info and surfaces the subset of ratios that
+# yfinance exposes: margins, growth, returns, leverage, coverage.
+#
+# When the real /api/financials endpoint lands, swap the fetch line
+# and the tool's contract stays the same.
+# ═══════════════════════════════════════════════════════════════════
+
+@register_tool(
+    name="FA",
+    description=(
+        "Financial Analysis — margins, growth, profitability, and "
+        "balance-sheet ratios for a ticker. Use when you want to "
+        "compare profitability or leverage across names, not just "
+        "prices. (Currently backed by the /api/info metrics; will "
+        "expand to full statements in a future update.)"
+    ),
+    params_schema={
+        "symbol": {"type": "string", "description": "Ticker symbol", "required": True},
+        "exchange": {"type": "string", "default": ""},
+    },
+    category="fundamentals",
+    stock_specific=True,
+)
+def wf_fa(symbol: str, exchange: str = "") -> FunctionResult:
+    if not symbol:
+        return FunctionResult(error="symbol required", summary="FA: no symbol")
+    payload = _flask_get_json(f"/api/info/{symbol}?exchange={exchange}")
+    if isinstance(payload, dict) and "error" in payload:
+        return FunctionResult(error=payload["error"], summary=f"FA {symbol} failed")
+
+    p = payload if isinstance(payload, dict) else {}
+    name = p.get("name", symbol)
+
+    # Pull the financial-ratio subset
+    ratios = {
+        "grossMargins":     p.get("grossMargins"),
+        "operatingMargins": p.get("operatingMargins"),
+        "profitMargins":    p.get("profitMargins"),
+        "returnOnEquity":   p.get("returnOnEquity"),
+        "returnOnAssets":   p.get("returnOnAssets"),
+        "earningsGrowth":   p.get("earningsGrowth"),
+        "revenueGrowth":    p.get("revenueGrowth"),
+        "trailingPE":       p.get("trailingPE"),
+        "forwardPE":        p.get("forwardPE"),
+        "pegRatio":         p.get("pegRatio"),
+        "priceToBook":      p.get("priceToBook"),
+        "priceToSalesTrailing12Months": p.get("priceToSalesTrailing12Months"),
+        "dividendYield":    p.get("dividendYield"),
+        "payoutRatio":      p.get("payoutRatio"),
+        "beta":             p.get("beta"),
+        "trailingEps":      p.get("trailingEps"),
+        "forwardEps":       p.get("forwardEps"),
+    }
+
+    def pct(v):
+        if v is None:
+            return "n/a"
+        try:
+            return f"{float(v) * 100:.1f}%"
+        except (TypeError, ValueError):
+            return str(v)
+
+    summary = (
+        f"{name} ({symbol}) — "
+        f"gross margin {pct(ratios['grossMargins'])}, "
+        f"operating margin {pct(ratios['operatingMargins'])}, "
+        f"ROE {pct(ratios['returnOnEquity'])}, "
+        f"rev growth {pct(ratios['revenueGrowth'])}, "
+        f"fwd P/E {ratios['forwardPE'] or 'n/a'}."
+    )
+
+    return FunctionResult(
+        data={"symbol": symbol, "name": name, "ratios": ratios},
+        summary=summary,
+        widget={
+            "type": "info",
+            "title": f"{symbol} financial analysis",
+            # Re-use the existing ``info`` widget renderer — it already
+            # knows how to display a key/value grid
+            "payload": p,
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# W — Worksheet / Watchlist
+#
+# The watchlist lives in the browser (localStorage worksheets). The
+# frontend injects the active worksheet into the workflow run's
+# ``user_context`` when kicking off a run, and this tool reads it via
+# ``get_run_context()``. The tool then enriches each symbol with a
+# live quote from /api/watchlist/quotes so the agent sees current
+# prices + relative volume.
+#
+# If the frontend didn't pass a watchlist (e.g. server-side cron run
+# or a stale session), the tool falls back to returning an empty list
+# with a helpful message — not an error.
+# ═══════════════════════════════════════════════════════════════════
+
+@register_tool(
+    name="W",
+    description=(
+        "Worksheet / Watchlist — the user's currently-active saved "
+        "symbols with live quotes, change %, volume, and relative "
+        "volume. Use this first when the user asks 'what's my "
+        "watchlist doing' or 'how are my names performing'. No "
+        "parameters: the list comes from the run's user context."
+    ),
+    params_schema={
+        "limit": {
+            "type": "integer",
+            "description": "Max symbols to enrich (default 50)",
+            "default": 50,
+        },
+    },
+    category="portfolio",
+)
+def wf_w(limit: int = 50) -> FunctionResult:
+    ctx = get_run_context()
+    watchlist = ctx.get("watchlist") or []
+
+    if not watchlist:
+        return FunctionResult(
+            data={"rows": [], "source": "empty"},
+            summary=(
+                "No watchlist in run context. Ask the user to select an "
+                "active worksheet in the terminal before running."
+            ),
+            widget={"type": "table", "title": "Watchlist (empty)", "rows": []},
+        )
+
+    # Normalize — the frontend sends [{symbol, exchange, name}, ...]
+    limit = max(1, min(int(limit), 100))
+    items = watchlist[:limit]
+    tickers_csv = ",".join(
+        (it.get("symbol") or "") for it in items if it.get("symbol")
+    )
+
+    # Batch quotes
+    quotes_payload = _flask_get_json(f"/api/watchlist/quotes?tickers={tickers_csv}")
+    quotes_list = []
+    if isinstance(quotes_payload, dict):
+        quotes_list = quotes_payload.get("quotes") or []
+    elif isinstance(quotes_payload, list):
+        quotes_list = quotes_payload
+
+    # Merge watchlist entries with their live quote rows. Pass RAW
+    # quote fields through (camelCase like ``changePct``,
+    # ``relativeVolume``) — the field-alias resolver + the frontend's
+    # smart formatter handle them. No manual field re-mapping here
+    # means adding new quote fields automatically flows to the UI.
+    by_symbol = {q.get("symbol"): q for q in quotes_list if isinstance(q, dict)}
+    rows = []
+    for it in items:
+        sym = it.get("symbol")
+        if not sym:
+            continue
+        q = by_symbol.get(sym) or {}
+        merged = {
+            "symbol":   sym,
+            "name":     it.get("name") or sym,
+            "exchange": it.get("exchange"),
+        }
+        merged.update(q)  # raw quote fields last — they always win
+        rows.append(merged)
+
+    # Quick summary — up vs down + two biggest movers either way.
+    # ``field()`` handles both changePct and change_pct via aliases.
+    def pct_of(r):
+        v = field(r, "CHANGE_PCT")
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    ups = [r for r in rows if pct_of(r) > 0]
+    downs = [r for r in rows if pct_of(r) < 0]
+    top_ups = sorted(ups, key=lambda r: -pct_of(r))[:2]
+    top_downs = sorted(downs, key=lambda r: pct_of(r))[:2]
+
+    def fmt(r):
+        pct = pct_of(r)
+        sign = "+" if pct >= 0 else ""
+        return f"{r['symbol']} ({sign}{pct:.1f}%)"
+
+    summary_bits = [f"{len(rows)} symbols"]
+    if ups or downs:
+        summary_bits.append(f"{len(ups)} up / {len(downs)} down")
+    if top_ups:
+        summary_bits.append("leaders: " + ", ".join(fmt(r) for r in top_ups))
+    if top_downs:
+        summary_bits.append("laggards: " + ", ".join(fmt(r) for r in top_downs))
+    summary = "Watchlist — " + "; ".join(summary_bits) + "."
+
+    return FunctionResult(
+        data={"rows": rows, "source": "worksheet"},
+        summary=summary,
+        widget={
+            "type": "table",
+            "title": f"Watchlist ({len(rows)})",
+            "columns": resolve_columns(
+                rows,
+                preferred=[
+                    "SYMBOL", "NAME", "CHANGE_PCT", "PRICE",
+                    "VOLUME", "REL_VOLUME", "MARKET_CAP", "EXCHANGE",
+                ],
             ),
             "rows": rows,
         },

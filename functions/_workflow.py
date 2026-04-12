@@ -23,6 +23,7 @@ safe to import even when those packages are missing. The agent loop in
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import time
@@ -219,20 +220,61 @@ class ToolSpec:
 TOOL_REGISTRY: Dict[str, ToolSpec] = {}
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Run context — per-workflow user state available to any tool
+#
+# Some tools (W / watchlist, future "current-user" helpers) need access
+# to data that doesn't belong in the LLM-visible params_schema:
+#
+#   • the user's watchlist symbols
+#   • their display name / locale / base currency
+#   • any asset-class-specific preferences
+#
+# We pass that state via a contextvar set at the start of each
+# workflow run. The tool reads it through ``get_run_context()``. This
+# keeps the tool's ``params_schema`` clean (the LLM never sees the
+# user data as a callable parameter) while still letting the tool
+# access it at execution time.
+#
+# For parallel step batches we copy the context explicitly via
+# ``contextvars.copy_context()`` — see _agent.py::_run_batch.
+# ═══════════════════════════════════════════════════════════════════
+
+_RUN_CONTEXT: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar(
+    "wf_run_context", default={}
+)
+
+
+def set_run_context(ctx: Dict[str, Any]) -> None:
+    """Install a per-run context dict (user_id, watchlist, ...)."""
+    _RUN_CONTEXT.set(ctx or {})
+
+
+def get_run_context() -> Dict[str, Any]:
+    """Return the current run context (or an empty dict)."""
+    return _RUN_CONTEXT.get() or {}
+
+
 def register_tool(
     name: str,
     description: str,
     params_schema: Optional[Dict[str, Any]] = None,
     category: str = "general",
     stock_specific: bool = False,
+    aliases: Optional[List[str]] = None,
 ):
     """Decorator that registers a function as an agent-callable tool.
 
     The decorated function must accept keyword arguments matching
     ``params_schema`` and return a ``FunctionResult``.
+
+    ``aliases`` lets a single executor surface under multiple names —
+    e.g. ``DES`` as the primary Bloomberg-style short code with
+    ``INFO`` as a backward-compat alias. Both show in the registry
+    and both resolve to the same ``ToolSpec``.
     """
     def decorator(func: Callable[..., FunctionResult]) -> Callable[..., FunctionResult]:
-        TOOL_REGISTRY[name] = ToolSpec(
+        spec = ToolSpec(
             name=name,
             description=description,
             params_schema=params_schema or {},
@@ -240,6 +282,20 @@ def register_tool(
             category=category,
             stock_specific=stock_specific,
         )
+        TOOL_REGISTRY[name] = spec
+        for alias in (aliases or []):
+            # Alias spec points to the same executor + schema but keeps
+            # its own name so ``openai_tool()`` / list_tools() render the
+            # alias correctly when the LLM wants to call it by that name.
+            alias_spec = ToolSpec(
+                name=alias,
+                description=f"{description} (alias for {name})",
+                params_schema=params_schema or {},
+                executor=func,
+                category=category,
+                stock_specific=stock_specific,
+            )
+            TOOL_REGISTRY[alias] = alias_spec
         return func
     return decorator
 

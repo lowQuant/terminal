@@ -24,6 +24,8 @@ const auth = {
   loading: true,
   isRegistering: false, // Prevents terminal flash during custom signup flow
 };
+// Expose to sibling scripts (wf.js reads auth.user.email etc.)
+window.auth = auth;
 
 // Check for invite or recovery links before Supabase strips the hash
 let isInviteOrRecovery = false;
