@@ -1236,12 +1236,14 @@ function renderHome(container) {
 // login and render as empty rows inside market-overview. We stick to
 // FOREXCOM/INDEX/OANDA/TVC/BITSTAMP/BINANCE which are reliably public.
 function injectMarketOverview(containerId) {
+  // On mobile, hide the chart so more asset rows are visible
+  const isMobile = window.innerWidth <= 700;
   injectWidget(containerId,
     'https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js',
     {
       colorTheme: 'dark',
       dateRange: '12M',
-      showChart: true,
+      showChart: !isMobile,
       locale: 'en',
       width: '100%',
       height: '100%',
@@ -3803,7 +3805,7 @@ function renderTickerTape() {
   const widgetDiv = document.createElement('div');
   widgetDiv.className = 'tradingview-widget-container';
   widgetDiv.style.width = '100%';
-  widgetDiv.style.height = '40px';
+  widgetDiv.style.height = '46px';
 
   const innerDiv = document.createElement('div');
   innerDiv.className = 'tradingview-widget-container__widget';

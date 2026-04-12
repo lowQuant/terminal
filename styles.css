@@ -398,7 +398,7 @@ body {
   flex-shrink: 0;
   border-bottom: 1px solid var(--border-primary);
   background: var(--bg-secondary);
-  height: 40px;
+  height: 46px;
   overflow: hidden;
 }
 
@@ -3105,7 +3105,7 @@ body {
   display: grid;
   gap: 16px;
   grid-template-columns: 1.7fr 1fr;
-  grid-template-rows: 640px;
+  grid-template-rows: 720px;
   min-height: 0;
 }
 
@@ -3195,7 +3195,7 @@ body {
 @media (max-width: 1100px) {
   .home-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(500px, auto) minmax(400px, auto);
+    grid-template-rows: 800px minmax(400px, auto);
   }
 }
 
@@ -3209,7 +3209,7 @@ body {
     grid-template-columns: 1fr;
   }
   .home-grid {
-    grid-template-rows: minmax(350px, auto) minmax(300px, auto);
+    grid-template-rows: 700px minmax(300px, auto);
   }
 }
 
