@@ -237,32 +237,74 @@ _YAHOO_HEADERS = {
 }
 
 
-def _fetch_timeseries(symbol: str, freq: str, fields: List[str]) -> Dict[str, Dict[str, float]]:
+def _fetch_via_yf_session(ticker: yf.Ticker, url: str, params: dict):
+    """Call Yahoo via yfinance's internal session (handles cookie+crumb).
+
+    Returns a requests.Response or None on failure. Falls back to a plain
+    requests.get() if yfinance's internal API is unavailable.
+    """
+    # yfinance 0.2.x exposes the data fetcher at Ticker._data with a
+    # `.get(url=, params=)` method that transparently handles the Yahoo
+    # cookie / crumb handshake. Older versions may call it differently.
+    data_client = getattr(ticker, '_data', None)
+    if data_client is not None and hasattr(data_client, 'get'):
+        try:
+            return data_client.get(url=url, params=params)
+        except TypeError:
+            # Some versions use positional args
+            try:
+                return data_client.get(url, params=params)
+            except Exception as e:
+                print(f'[fa] _data.get failed: {e}')
+        except Exception as e:
+            print(f'[fa] _data.get failed: {e}')
+
+    # Plain requests fallback — works for many symbols but may be rate-limited
+    try:
+        return requests.get(url, params=params, headers=_YAHOO_HEADERS, timeout=15)
+    except Exception as e:
+        print(f'[fa] requests.get failed: {e}')
+        return None
+
+
+def _fetch_timeseries(
+    symbol: str,
+    freq: str,
+    fields: List[str],
+    ticker: Optional[yf.Ticker] = None,
+) -> Dict[str, Dict[str, float]]:
     """Fetch Yahoo fundamentals-timeseries for a symbol.
+
+    Uses yfinance's internal session so the cookie/crumb handshake is
+    done for us. Chunks the field list (Yahoo caps URL length at ~8KB).
 
     Args:
         symbol: yfinance-style ticker (e.g. 'AAPL', 'TM', '7203.T')
         freq: 'annual' or 'quarterly'
         fields: base field names without prefix (e.g. 'TotalRevenue')
+        ticker: optional pre-built yf.Ticker to reuse its session
 
     Returns:
         {asOfDate (str): {field_base: raw_value}}
-
-        Where asOfDate is 'YYYY-MM-DD'. Fields missing from a period
-        simply aren't present in its inner dict. Periods sorted
-        oldest-first.
     """
-    prefix_map = {'annual': 'annual', 'quarterly': 'quarterly'}
-    prefix = prefix_map.get(freq, 'annual')
+    prefix = 'annual' if freq == 'annual' else 'quarterly'
     typed = [prefix + f for f in fields]
 
-    # Yahoo's timeseries endpoint requires a window. Going back 12 years
-    # gives enough room for 10+ annual periods or 40+ quarters.
+    # Windows
     now_ts = int(time.time())
-    start_ts = now_ts - (12 * 365 * 86_400)
+    # Use a very old start so we get the full history Yahoo has.
+    start_ts = 493590046  # 1985-08-25 — same default as yfinance internally
 
-    # Yahoo enforces a max URL length; chunk the type list in groups of 20.
+    if ticker is None:
+        ticker = yf.Ticker(symbol)
+    # Warm up yfinance session (triggers the cookie/crumb fetch)
+    try:
+        _ = ticker._data.cookie  # attribute access forces init in most versions
+    except Exception:
+        pass
+
     periods: Dict[str, Dict[str, float]] = {}
+    fetch_errors = 0
 
     for chunk_start in range(0, len(typed), 20):
         chunk = typed[chunk_start:chunk_start + 20]
@@ -271,20 +313,27 @@ def _fetch_timeseries(symbol: str, freq: str, fields: List[str]) -> Dict[str, Di
             'type': ','.join(chunk),
             'period1': start_ts,
             'period2': now_ts,
+            'merge': 'false',
+            'padTimeSeries': 'true',
+            'lang': 'en-US',
+            'region': 'US',
         }
+        url = _YAHOO_URL.format(symbol=symbol)
 
-        resp = requests.get(
-            _YAHOO_URL.format(symbol=symbol),
-            params=params,
-            headers=_YAHOO_HEADERS,
-            timeout=15,
-        )
-        if resp.status_code != 200:
+        resp = _fetch_via_yf_session(ticker, url, params)
+        if resp is None:
+            fetch_errors += 1
+            continue
+        status = getattr(resp, 'status_code', None)
+        if status is not None and status != 200:
+            fetch_errors += 1
+            print(f'[fa] Yahoo returned {status} for {symbol} chunk {chunk_start // 20}')
             continue
 
         try:
             body = resp.json()
         except ValueError:
+            fetch_errors += 1
             continue
 
         results = (body.get('timeseries') or {}).get('result') or []
@@ -295,13 +344,11 @@ def _fetch_timeseries(symbol: str, freq: str, fields: List[str]) -> Dict[str, Di
             if not typed_key:
                 continue
 
-            # Extract the field base (strip 'annual' / 'quarterly' prefix)
             if typed_key.startswith(prefix):
                 field_base = typed_key[len(prefix):]
             else:
                 field_base = typed_key
 
-            # The data points are under a key that matches typed_key
             points = entry.get(typed_key) or []
             for point in points:
                 if not point:
@@ -313,18 +360,195 @@ def _fetch_timeseries(symbol: str, freq: str, fields: List[str]) -> Dict[str, Di
                     continue
                 try:
                     raw = float(raw)
-                    if raw != raw:  # NaN
+                    if raw != raw:
                         continue
                 except (TypeError, ValueError):
                     continue
                 periods.setdefault(as_of, {})[field_base] = raw
 
+    if not periods:
+        print(f'[fa] timeseries returned no data for {symbol} '
+              f'({freq}) — errors={fetch_errors}. Falling back to yfinance properties.')
+
+    return periods
+
+
+# ── Fallback via yfinance DataFrame properties ─────────────────────
+#
+# If the timeseries endpoint fails (cookies expired, rate limit, some
+# symbols just have no timeseries coverage), we fall back to
+# yfinance's .income_stmt / .quarterly_income_stmt etc. These only
+# return 4–5 periods but at least we always show SOMETHING.
+
+# Map our base field names → possible row names in yfinance DataFrames.
+# yfinance renames rows across versions so we try several variants.
+_YF_FIELD_ALIASES = {
+    'TotalRevenue':                               ['TotalRevenue', 'Total Revenue'],
+    'CostOfRevenue':                              ['CostOfRevenue', 'Cost Of Revenue'],
+    'GrossProfit':                                ['GrossProfit', 'Gross Profit'],
+    'ResearchAndDevelopment':                     ['ResearchAndDevelopment', 'Research Development'],
+    'SellingGeneralAndAdministration':            ['SellingGeneralAndAdministration', 'Selling General Administrative', 'Selling, General and Administrative'],
+    'OtherOperatingExpenses':                     ['OtherOperatingExpenses', 'Other Operating Expenses'],
+    'OperatingExpense':                           ['OperatingExpense', 'Operating Expense', 'Total Operating Expenses'],
+    'OperatingIncome':                            ['OperatingIncome', 'Operating Income'],
+    'InterestIncome':                             ['InterestIncome', 'Interest Income'],
+    'InterestExpense':                            ['InterestExpense', 'Interest Expense'],
+    'OtherNonOperatingIncomeExpenses':            ['OtherNonOperatingIncomeExpenses', 'Other Non Operating Income Expenses'],
+    'PretaxIncome':                               ['PretaxIncome', 'Pretax Income', 'Income Before Tax'],
+    'TaxProvision':                               ['TaxProvision', 'Tax Provision', 'Income Tax Expense'],
+    'NetIncomeContinuousOperations':              ['NetIncomeContinuousOperations', 'Net Income Continuous Operations'],
+    'NetIncome':                                  ['NetIncome', 'Net Income', 'NetIncomeCommonStockholders'],
+    'EBIT':                                       ['EBIT'],
+    'EBITDA':                                     ['EBITDA', 'NormalizedEBITDA'],
+    'BasicEPS':                                   ['BasicEPS', 'Basic EPS'],
+    'DilutedEPS':                                 ['DilutedEPS', 'Diluted EPS'],
+    'BasicAverageShares':                         ['BasicAverageShares', 'Basic Average Shares'],
+    'DilutedAverageShares':                       ['DilutedAverageShares', 'Diluted Average Shares'],
+    # Balance sheet
+    'CashAndCashEquivalents':                     ['CashAndCashEquivalents', 'Cash And Cash Equivalents'],
+    'OtherShortTermInvestments':                  ['OtherShortTermInvestments', 'Other Short Term Investments'],
+    'CashCashEquivalentsAndShortTermInvestments': ['CashCashEquivalentsAndShortTermInvestments', 'Cash And Short Term Investments'],
+    'Receivables':                                ['Receivables', 'Net Receivables'],
+    'Inventory':                                  ['Inventory'],
+    'PrepaidAssets':                              ['PrepaidAssets', 'Prepaid Assets'],
+    'OtherCurrentAssets':                         ['OtherCurrentAssets', 'Other Current Assets'],
+    'CurrentAssets':                              ['CurrentAssets', 'Total Current Assets'],
+    'NetPPE':                                     ['NetPPE', 'Net PPE', 'Property Plant Equipment'],
+    'Goodwill':                                   ['Goodwill'],
+    'OtherIntangibleAssets':                      ['OtherIntangibleAssets', 'Other Intangible Assets'],
+    'InvestmentsAndAdvances':                     ['InvestmentsAndAdvances', 'Investments And Advances'],
+    'OtherNonCurrentAssets':                      ['OtherNonCurrentAssets', 'Other Non Current Assets'],
+    'TotalNonCurrentAssets':                      ['TotalNonCurrentAssets', 'Total Non Current Assets'],
+    'TotalAssets':                                ['TotalAssets', 'Total Assets'],
+    'AccountsPayable':                            ['AccountsPayable', 'Accounts Payable'],
+    'CurrentDebt':                                ['CurrentDebt', 'Current Debt', 'Short Long Term Debt'],
+    'CurrentDeferredLiabilities':                 ['CurrentDeferredLiabilities'],
+    'OtherCurrentLiabilities':                    ['OtherCurrentLiabilities', 'Other Current Liabilities'],
+    'CurrentLiabilities':                         ['CurrentLiabilities', 'Total Current Liabilities'],
+    'LongTermDebt':                               ['LongTermDebt', 'Long Term Debt'],
+    'NonCurrentDeferredLiabilities':              ['NonCurrentDeferredLiabilities'],
+    'OtherNonCurrentLiabilities':                 ['OtherNonCurrentLiabilities', 'Other Non Current Liabilities'],
+    'TotalNonCurrentLiabilitiesNetMinorityInterest': ['TotalNonCurrentLiabilitiesNetMinorityInterest'],
+    'TotalLiabilitiesNetMinorityInterest':        ['TotalLiabilitiesNetMinorityInterest', 'Total Liab'],
+    'CommonStock':                                ['CommonStock', 'Common Stock'],
+    'RetainedEarnings':                           ['RetainedEarnings', 'Retained Earnings'],
+    'StockholdersEquity':                         ['StockholdersEquity', 'Total Stockholder Equity'],
+    'TotalDebt':                                  ['TotalDebt', 'Total Debt'],
+    'NetDebt':                                    ['NetDebt', 'Net Debt'],
+    'WorkingCapital':                             ['WorkingCapital', 'Working Capital'],
+    'ShareIssued':                                ['ShareIssued', 'Share Issued', 'Ordinary Shares Number'],
+    # Cash flow
+    'NetIncomeFromContinuingOperations':          ['NetIncomeFromContinuingOperations', 'Net Income'],
+    'DepreciationAmortizationDepletion':          ['DepreciationAmortizationDepletion', 'Depreciation And Amortization'],
+    'StockBasedCompensation':                     ['StockBasedCompensation', 'Stock Based Compensation'],
+    'ChangeInWorkingCapital':                     ['ChangeInWorkingCapital', 'Change In Working Capital'],
+    'OperatingCashFlow':                          ['OperatingCashFlow', 'Total Cash From Operating Activities'],
+    'CapitalExpenditure':                         ['CapitalExpenditure', 'Capital Expenditures'],
+    'NetInvestmentPurchaseAndSale':               ['NetInvestmentPurchaseAndSale'],
+    'NetBusinessPurchaseAndSale':                 ['NetBusinessPurchaseAndSale'],
+    'InvestingCashFlow':                          ['InvestingCashFlow', 'Total Cashflows From Investing Activities'],
+    'NetIssuancePaymentsOfDebt':                  ['NetIssuancePaymentsOfDebt', 'Net Borrowings'],
+    'RepurchaseOfCapitalStock':                   ['RepurchaseOfCapitalStock', 'Repurchase Of Stock'],
+    'IssuanceOfCapitalStock':                     ['IssuanceOfCapitalStock', 'Issuance Of Stock'],
+    'CashDividendsPaid':                          ['CashDividendsPaid', 'Dividends Paid'],
+    'FinancingCashFlow':                          ['FinancingCashFlow', 'Total Cash From Financing Activities'],
+    'ChangesInCash':                              ['ChangesInCash', 'Change In Cash'],
+    'EndCashPosition':                            ['EndCashPosition', 'End Cash Position'],
+    'FreeCashFlow':                               ['FreeCashFlow', 'Free Cash Flow'],
+}
+
+
+def _fallback_yfinance_properties(ticker: yf.Ticker, freq: str) -> Dict[str, Dict[str, float]]:
+    """Fall back to yfinance's convenience DataFrame properties.
+
+    Returns only 4–5 periods but guarantees SOMETHING is returned when
+    the timeseries endpoint is unavailable.
+    """
+    # Attribute access on yfinance Ticker triggers a lazy fetch that can
+    # raise if the symbol doesn't exist or the network blips. Isolate
+    # each attribute so one failure doesn't kill the others.
+    frames = []
+    names = (
+        ('quarterly_income_stmt', 'quarterly_balance_sheet', 'quarterly_cashflow')
+        if freq == 'quarterly'
+        else ('income_stmt', 'balance_sheet', 'cashflow')
+    )
+    for attr in names:
+        try:
+            frames.append(getattr(ticker, attr, None))
+        except Exception as e:
+            print(f'[fa] fallback {attr} error: {e}')
+            frames.append(None)
+
+    periods: Dict[str, Dict[str, float]] = {}
+
+    for df in frames:
+        if df is None:
+            continue
+        try:
+            if df.empty:
+                continue
+        except Exception:
+            continue
+
+        # DataFrame columns are Timestamps, rows are field names
+        for base_key, aliases in _YF_FIELD_ALIASES.items():
+            row = None
+            for alias in aliases:
+                if alias in df.index:
+                    row = df.loc[alias]
+                    break
+            if row is None:
+                continue
+
+            for col, val in zip(df.columns, row.values):
+                try:
+                    as_of = col.strftime('%Y-%m-%d')
+                except AttributeError:
+                    as_of = str(col)
+                try:
+                    if val is None:
+                        continue
+                    fv = float(val)
+                    if fv != fv:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                periods.setdefault(as_of, {})[base_key] = fv
+
     return periods
 
 
 def _build_payload(symbol: str, freq: str) -> dict:
-    """Fetch + shape the full FA payload (no FX conversion applied)."""
-    periods_map = _fetch_timeseries(symbol, freq, _ALL_FIELDS)
+    """Fetch + shape the full FA payload (no FX conversion applied).
+
+    Strategy:
+      1. Try Yahoo's fundamentals-timeseries endpoint for deep history
+         (10+ years annual, 40+ quarters).
+      2. If that returns nothing (cookie expired, rate-limited, some
+         symbols just aren't covered), fall back to yfinance's
+         DataFrame properties which guarantee 4–5 periods.
+      3. Merge: timeseries takes priority; fallback only fills in
+         periods the timeseries call missed.
+    """
+    ticker = yf.Ticker(symbol)
+
+    # Primary: timeseries endpoint (auth'd via yfinance session)
+    periods_map = _fetch_timeseries(symbol, freq, _ALL_FIELDS, ticker=ticker)
+
+    # Always also pull yfinance's DataFrame properties — cheap, and
+    # the overlap with timeseries is a nice way to validate, plus it
+    # fills gaps if the timeseries call partially succeeded.
+    fallback_map = _fallback_yfinance_properties(ticker, freq)
+
+    # Merge: timeseries wins on conflicts, fallback fills gaps.
+    if not periods_map:
+        periods_map = fallback_map
+    else:
+        for as_of, fields in fallback_map.items():
+            merged = periods_map.setdefault(as_of, {})
+            for k, v in fields.items():
+                merged.setdefault(k, v)
 
     # Chronological order: oldest → newest (Bloomberg convention)
     period_dates = sorted(periods_map.keys())
@@ -360,7 +584,7 @@ def _build_payload(symbol: str, freq: str) -> dict:
     # Highlights via yfinance .info (TTM snapshot ratios)
     info = {}
     try:
-        info = yf.Ticker(symbol).info or {}
+        info = ticker.info or {}
     except Exception:
         info = {}
 
