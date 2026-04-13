@@ -3737,7 +3737,7 @@ function faRenderStatement(data, sectionKey, title) {
       <div class="evts-empty">
         <div class="evts-empty__icon">◆</div>
         <div>No ${title.toLowerCase()} data available</div>
-        <div class="text-muted" style="font-size:11px; margin-top:4px">Yahoo did not return figures for ${escHtml(data.symbol)} (${faState.period}).</div>
+        <div class="text-muted" style="font-size:11px; margin-top:4px">Could not fetch figures for ${escHtml(data.symbol)} (${faState.period}). Try switching period or waiting a minute — Yahoo occasionally rate-limits.</div>
       </div>
     `;
   }
