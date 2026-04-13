@@ -3737,28 +3737,125 @@ function faRenderStatement(data, sectionKey, title) {
       <div class="evts-empty">
         <div class="evts-empty__icon">◆</div>
         <div>No ${title.toLowerCase()} data available</div>
-        <div class="text-muted" style="font-size:11px; margin-top:4px">yfinance did not return figures for ${escHtml(data.symbol)} (${faState.period}).</div>
+        <div class="text-muted" style="font-size:11px; margin-top:4px">Yahoo did not return figures for ${escHtml(data.symbol)} (${faState.period}).</div>
       </div>
     `;
   }
 
-  // Header row: "Item" + one column per period
+  // Header row: "Item" + one column per period (chronological left-to-right)
   const headerCells = periods.map((p) => `<th class="fa-th fa-th--num">${faFmtPeriod(p, data.period)}</th>`).join('');
 
-  // Data rows
+  // Lookup map by key so computed rows can reference base rows
+  const byKey = {};
+  rows.forEach((r) => { if (r.key && r.kind === 'data') byKey[r.key] = r; });
+  // Also pull cross-section rows (Ratios/Highlights depends on this too)
+  const crossByKey = {};
+  for (const sec of ['income', 'balance', 'cashflow']) {
+    for (const r of (data[sec] || [])) {
+      if (r.key && r.kind === 'data') crossByKey[r.key] = r;
+    }
+  }
+
+  // Compute values for a computed row expression like 'margin:GrossProfit/TotalRevenue'
+  // or 'growth:TotalRevenue' or 'ratio:StockholdersEquity/ShareIssued'
+  const computeValues = (expr) => {
+    if (!expr) return null;
+    const [op, rest] = expr.split(':');
+    if (op === 'growth') {
+      const row = crossByKey[rest];
+      if (!row) return null;
+      return row.values.map((v, i) => {
+        if (i === 0) return null;
+        const prev = row.values[i - 1];
+        if (v == null || prev == null || prev === 0) return null;
+        return (v - prev) / Math.abs(prev);
+      });
+    }
+    const [numKey, denKey] = rest.split('/');
+    const num = crossByKey[numKey];
+    const den = crossByKey[denKey];
+    if (!num || !den) return null;
+    return num.values.map((n, i) => {
+      const d = den.values[i];
+      if (n == null || d == null || d === 0) return null;
+      return n / d;
+    });
+  };
+
+  // Determine formatting for a row
+  const fmtFor = (row) => {
+    if (row.kind === 'computed') {
+      const [op] = row.key.split(':');
+      if (op === 'growth' || op === 'margin') return { percent: true, decimals: 2 };
+      if (op === 'ratio')  return { compact: false, decimals: 2 };
+      return { compact: true };
+    }
+    // Data row
+    const k = row.key || '';
+    if (/EPS$/i.test(k))        return { compact: false, decimals: 2 };
+    if (/Shares|Number/i.test(k)) return { compact: true };  // Share counts get B/M/K
+    return { compact: true };
+  };
+
+  // Build tbody
   const bodyRows = rows.map((row) => {
-    const isEpsRow = /EPS$/i.test(row.key) || /Shares/i.test(row.key);
-    const cells = row.values.map((v) => {
-      if (v == null) return `<td class="fa-td fa-td--num fa-cell--empty">—</td>`;
-      const fmt = isEpsRow
-        ? faFmtNum(v, { compact: false, decimals: 2 })
-        : faFmtNum(v, { compact: true });
-      const cls = v < 0 ? 'fa-td fa-td--num fa-neg' : 'fa-td fa-td--num';
-      return `<td class="${cls}">${fmt}</td>`;
+    if (row.kind === 'header') {
+      return `
+        <tr class="fa-row fa-row--header">
+          <td class="fa-td fa-td--label fa-td--section" colspan="${periods.length + 1}">${escHtml(row.label)}</td>
+        </tr>
+      `;
+    }
+
+    let values;
+    if (row.kind === 'computed') {
+      values = computeValues(row.key);
+      if (!values) return '';  // Skip if dependencies missing
+    } else {
+      values = row.values;
+    }
+
+    const opts = fmtFor(row);
+    const rowClass = row.kind === 'computed' ? 'fa-row fa-row--computed' : 'fa-row';
+    const labelClass = row.kind === 'computed' ? 'fa-td fa-td--label fa-td--derived' : 'fa-td fa-td--label';
+
+    // Highlight total/summary rows (exact label match; exclude computed rows)
+    const TOTAL_LABELS = new Set([
+      'TOTAL ASSETS',
+      'TOTAL LIABILITIES',
+      'TOTAL EQUITY',
+      'Total Current Assets',
+      'Total Non-Current Assets',
+      'Total Current Liabilities',
+      'Total Non-Current Liabilities',
+      'Total Operating Expenses',
+      'Gross Profit',
+      'Operating Income',
+      'Pretax Income',
+      'Net Income',
+      'Net Income Cont. Ops',
+      'EBITDA',
+      'EBIT',
+      'Operating Cash Flow',
+      'Investing Cash Flow',
+      'Financing Cash Flow',
+      'Free Cash Flow',
+      'Net Change in Cash',
+      'Total Debt',
+    ]);
+    const isTotal = row.kind === 'data' && TOTAL_LABELS.has(row.label);
+    const boldCls = isTotal ? ' fa-td--bold' : '';
+
+    const cells = values.map((v) => {
+      if (v == null) return `<td class="fa-td fa-td--num fa-cell--empty${boldCls}">—</td>`;
+      const fmt = faFmtNum(v, opts);
+      const numCls = v < 0 ? 'fa-td fa-td--num fa-neg' + boldCls : 'fa-td fa-td--num' + boldCls;
+      return `<td class="${numCls}">${fmt}</td>`;
     }).join('');
+
     return `
-      <tr class="fa-row">
-        <td class="fa-td fa-td--label">${escHtml(row.label)}</td>
+      <tr class="${rowClass}">
+        <td class="${labelClass}${boldCls}">${escHtml(row.label)}</td>
         ${cells}
       </tr>
     `;
@@ -3769,12 +3866,12 @@ function faRenderStatement(data, sectionKey, title) {
       <table class="fa-table">
         <thead>
           <tr>
-            <th class="fa-th fa-th--label">Item</th>
+            <th class="fa-th fa-th--label">${escHtml(title)}</th>
             ${headerCells}
           </tr>
           <tr class="fa-subheader">
-            <th class="fa-th fa-th--label fa-th--muted">${escHtml(title)}</th>
-            ${periods.map(() => `<th class="fa-th fa-th--muted fa-th--num">${escHtml(ccy)}</th>`).join('')}
+            <th class="fa-th fa-th--label fa-th--muted">in ${escHtml(ccy)}</th>
+            ${periods.map(() => `<th class="fa-th fa-th--muted fa-th--num"></th>`).join('')}
           </tr>
         </thead>
         <tbody>${bodyRows}</tbody>
@@ -3786,83 +3883,165 @@ function faRenderStatement(data, sectionKey, title) {
 function faRenderHighlights(data) {
   const hl = data.highlights || {};
   const ccy = data.displayCurrency || data.currency || '';
+  const periods = data.periods || [];
+
+  // Pull key line items from the statements to show as a time-series table
+  const find = (sec, key) => (data[sec] || []).find((r) => r.key === key && r.kind === 'data');
+  const revenueRow     = find('income',   'TotalRevenue');
+  const grossRow       = find('income',   'GrossProfit');
+  const opIncomeRow    = find('income',   'OperatingIncome');
+  const ebitdaRow      = find('income',   'EBITDA');
+  const netIncomeRow   = find('income',   'NetIncome');
+  const dilEpsRow      = find('income',   'DilutedEPS');
+  const ocfRow         = find('cashflow', 'OperatingCashFlow');
+  const fcfRow         = find('cashflow', 'FreeCashFlow');
+  const capexRow       = find('cashflow', 'CapitalExpenditure');
+  const assetsRow      = find('balance',  'TotalAssets');
+  const equityRow      = find('balance',  'StockholdersEquity');
+  const debtRow        = find('balance',  'TotalDebt');
+
+  const growth = (row) => {
+    if (!row) return null;
+    return row.values.map((v, i) => {
+      if (i === 0) return null;
+      const p = row.values[i - 1];
+      if (v == null || p == null || p === 0) return null;
+      return (v - p) / Math.abs(p);
+    });
+  };
+  const margin = (num, den) => {
+    if (!num || !den) return null;
+    return num.values.map((n, i) => {
+      const d = den.values[i];
+      if (n == null || d == null || d === 0) return null;
+      return n / d;
+    });
+  };
+
+  // Build a time-series KPI table at the top
+  const kpiRows = [
+    { label: 'Revenue',               values: revenueRow?.values,                 opts: { compact: true } },
+    { label: 'Revenue Growth YoY',    values: growth(revenueRow),                 opts: { percent: true, decimals: 1 } },
+    { label: 'Gross Profit',          values: grossRow?.values,                   opts: { compact: true } },
+    { label: 'Gross Margin',          values: margin(grossRow, revenueRow),       opts: { percent: true, decimals: 1 } },
+    { label: 'Operating Income',      values: opIncomeRow?.values,                opts: { compact: true } },
+    { label: 'Operating Margin',      values: margin(opIncomeRow, revenueRow),    opts: { percent: true, decimals: 1 } },
+    { label: 'EBITDA',                values: ebitdaRow?.values,                  opts: { compact: true } },
+    { label: 'EBITDA Margin',         values: margin(ebitdaRow, revenueRow),      opts: { percent: true, decimals: 1 } },
+    { label: 'Net Income',            values: netIncomeRow?.values,               opts: { compact: true } },
+    { label: 'Net Margin',            values: margin(netIncomeRow, revenueRow),   opts: { percent: true, decimals: 1 } },
+    { label: 'Diluted EPS',           values: dilEpsRow?.values,                  opts: { compact: false, decimals: 2 } },
+    { label: 'EPS Growth YoY',        values: growth(dilEpsRow),                  opts: { percent: true, decimals: 1 } },
+    { label: 'Operating Cash Flow',   values: ocfRow?.values,                     opts: { compact: true } },
+    { label: 'Capital Expenditure',   values: capexRow?.values,                   opts: { compact: true } },
+    { label: 'Free Cash Flow',        values: fcfRow?.values,                     opts: { compact: true } },
+    { label: 'FCF Margin',            values: margin(fcfRow, revenueRow),         opts: { percent: true, decimals: 1 } },
+    { label: 'Total Assets',          values: assetsRow?.values,                  opts: { compact: true } },
+    { label: 'Total Debt',            values: debtRow?.values,                    opts: { compact: true } },
+    { label: "Shareholders' Equity",  values: equityRow?.values,                  opts: { compact: true } },
+    { label: 'Return on Equity',      values: margin(netIncomeRow, equityRow),    opts: { percent: true, decimals: 1 } },
+    { label: 'Return on Assets',      values: margin(netIncomeRow, assetsRow),    opts: { percent: true, decimals: 1 } },
+  ];
+
+  const headerCells = periods.map((p) => `<th class="fa-th fa-th--num">${faFmtPeriod(p, data.period)}</th>`).join('');
+
+  const kpiTableRows = kpiRows.map((r) => {
+    if (!r.values) return '';
+    const cells = r.values.map((v) => {
+      if (v == null) return `<td class="fa-td fa-td--num fa-cell--empty">—</td>`;
+      const fmt = faFmtNum(v, r.opts);
+      const cls = v < 0 ? 'fa-td fa-td--num fa-neg' : 'fa-td fa-td--num';
+      return `<td class="${cls}">${fmt}</td>`;
+    }).join('');
+    const labelCls = r.opts.percent ? 'fa-td fa-td--label fa-td--derived' : 'fa-td fa-td--label';
+    return `<tr class="fa-row"><td class="${labelCls}">${escHtml(r.label)}</td>${cells}</tr>`;
+  }).join('');
+
+  // Snapshot cards below the table (market-data, shareholder info)
+  const n = (v, opts) => v == null ? '—' : faFmtNum(v, opts);
+  const nMon = (v) => v == null ? '—' : `${faFmtNum(v, { compact: true })} ${ccy}`;
+  const nPct = (v) => v == null ? '—' : faFmtNum(v, { percent: true, decimals: 2 });
+  const nRat = (v) => v == null ? '—' : faFmtNum(v, { compact: false, decimals: 2, suffix: 'x' });
 
   const card = (title, items) => `
     <div class="fa-hl-card">
       <div class="fa-hl-card__title">${title}</div>
       <div class="fa-hl-card__items">
-        ${items.map(([label, value, muted]) => `
+        ${items.map(([label, value]) => `
           <div class="fa-hl-item">
             <span class="fa-hl-item__label">${label}</span>
-            <span class="fa-hl-item__value ${muted ? 'fa-hl-item__value--muted' : ''}">${value}</span>
+            <span class="fa-hl-item__value">${value}</span>
           </div>
         `).join('')}
       </div>
     </div>
   `;
 
-  const n = (v, opts) => v == null ? '—' : faFmtNum(v, opts);
-  const nMon = (v) => v == null ? '—' : `${faFmtNum(v, { compact: true })} ${ccy}`;
-  const nPct = (v) => v == null ? '—' : faFmtNum(v, { percent: true });
-  const nRat = (v) => v == null ? '—' : faFmtNum(v, { compact: false, decimals: 2, suffix: 'x' });
-
   return `
-    <div class="fa-highlights">
-      ${card('VALUATION', [
-        ['Market Cap',         nMon(hl.marketCap)],
-        ['Enterprise Value',   nMon(hl.enterpriseValue)],
-        ['Trailing P/E',       nRat(hl.trailingPE)],
-        ['Forward P/E',        nRat(hl.forwardPE)],
-        ['PEG Ratio',          nRat(hl.pegRatio)],
-        ['Price / Book',       nRat(hl.priceToBook)],
-        ['Price / Sales',      nRat(hl.priceToSales)],
-        ['EV / Revenue',       nRat(hl.evToRevenue)],
-        ['EV / EBITDA',        nRat(hl.evToEbitda)],
-      ])}
-      ${card('PROFITABILITY', [
-        ['Gross Margin',       nPct(hl.grossMargins)],
-        ['Operating Margin',   nPct(hl.operatingMargins)],
-        ['Profit Margin',      nPct(hl.profitMargins)],
-        ['Return on Equity',   nPct(hl.returnOnEquity)],
-        ['Return on Assets',   nPct(hl.returnOnAssets)],
-      ])}
-      ${card('GROWTH (YoY)', [
-        ['Revenue Growth',     nPct(hl.revenueGrowth)],
-        ['Earnings Growth',    nPct(hl.earningsGrowth)],
-        ['Quarterly Earn. Growth', nPct(hl.earningsQuarterlyGrowth)],
-      ])}
-      ${card('FINANCIAL HEALTH', [
-        ['Total Cash',         nMon(hl.totalCash)],
-        ['Total Debt',         nMon(hl.totalDebt)],
-        ['Debt / Equity',      n(hl.debtToEquity, { compact: false, decimals: 2 })],
-        ['Current Ratio',      nRat(hl.currentRatio)],
-        ['Quick Ratio',        nRat(hl.quickRatio)],
-      ])}
-      ${card('PER-SHARE (TTM)', [
-        ['Revenue',            nMon(hl.revenue)],
-        ['Net Income',         nMon(hl.netIncome)],
-        ['EBITDA',             nMon(hl.ebitda)],
-        ['Operating Cash Flow', nMon(hl.operatingCashFlow)],
-        ['Free Cash Flow',     nMon(hl.freeCashFlow)],
-        ['Trailing EPS',       nMon(hl.trailingEps)],
-        ['Forward EPS',        nMon(hl.forwardEps)],
-        ['Book Value',         nMon(hl.bookValue)],
-      ])}
-      ${card('SHAREHOLDER', [
-        ['Dividend Yield',     nPct(hl.dividendYield)],
-        ['Payout Ratio',       nPct(hl.payoutRatio)],
-        ['Shares Outstanding', n(hl.sharesOutstanding, { compact: true })],
-        ['Float',              n(hl.floatShares, { compact: true })],
-        ['Beta',               n(hl.beta, { compact: false, decimals: 2 })],
-      ])}
+    <div class="fa-highlights-wrap">
+      <div class="fa-highlights-section">
+        <div class="fa-highlights-section__label">KEY METRICS — ${faState.period.toUpperCase()}</div>
+        <div class="fa-table-wrap fa-table-wrap--kpi">
+          <table class="fa-table">
+            <thead>
+              <tr>
+                <th class="fa-th fa-th--label">Metric</th>
+                ${headerCells}
+              </tr>
+              <tr class="fa-subheader">
+                <th class="fa-th fa-th--label fa-th--muted">in ${escHtml(ccy)}</th>
+                ${periods.map(() => `<th class="fa-th fa-th--muted fa-th--num"></th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>${kpiTableRows}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="fa-highlights-section">
+        <div class="fa-highlights-section__label">SNAPSHOT — TTM &amp; MARKET DATA</div>
+        <div class="fa-highlights">
+          ${card('VALUATION', [
+            ['Market Cap',         nMon(hl.marketCap)],
+            ['Enterprise Value',   nMon(hl.enterpriseValue)],
+            ['Trailing P/E',       nRat(hl.trailingPE)],
+            ['Forward P/E',        nRat(hl.forwardPE)],
+            ['PEG Ratio',          nRat(hl.pegRatio)],
+            ['Price / Book',       nRat(hl.priceToBook)],
+            ['Price / Sales',      nRat(hl.priceToSales)],
+            ['EV / Revenue',       nRat(hl.evToRevenue)],
+            ['EV / EBITDA',        nRat(hl.evToEbitda)],
+          ])}
+          ${card('PROFITABILITY (TTM)', [
+            ['Gross Margin',       nPct(hl.grossMargins)],
+            ['Operating Margin',   nPct(hl.operatingMargins)],
+            ['Profit Margin',      nPct(hl.profitMargins)],
+            ['Return on Equity',   nPct(hl.returnOnEquity)],
+            ['Return on Assets',   nPct(hl.returnOnAssets)],
+          ])}
+          ${card('FINANCIAL HEALTH', [
+            ['Total Cash',         nMon(hl.totalCash)],
+            ['Total Debt',         nMon(hl.totalDebt)],
+            ['Debt / Equity',      n(hl.debtToEquity, { compact: false, decimals: 2 })],
+            ['Current Ratio',      nRat(hl.currentRatio)],
+            ['Quick Ratio',        nRat(hl.quickRatio)],
+          ])}
+          ${card('SHAREHOLDER', [
+            ['Dividend Yield',     nPct(hl.dividendYield)],
+            ['Payout Ratio',       nPct(hl.payoutRatio)],
+            ['Shares Outstanding', n(hl.sharesOutstanding, { compact: true })],
+            ['Float',              n(hl.floatShares, { compact: true })],
+            ['Beta',               n(hl.beta, { compact: false, decimals: 2 })],
+          ])}
+        </div>
+      </div>
     </div>
   `;
 }
 
 function faRenderRatios(data) {
-  const rows = data.income || [];
   const periods = data.periods || [];
-  if (rows.length === 0 || periods.length === 0) {
+  if (periods.length === 0) {
     return `
       <div class="evts-empty">
         <div class="evts-empty__icon">◆</div>
@@ -3871,73 +4050,103 @@ function faRenderRatios(data) {
     `;
   }
 
-  // Pull helper
-  const getRow = (section, key) => (data[section] || []).find((r) => r.key === key);
-  const revenueRow       = getRow('income', 'TotalRevenue');
-  const grossProfitRow   = getRow('income', 'GrossProfit');
-  const opIncomeRow      = getRow('income', 'OperatingIncome');
-  const netIncomeRow     = getRow('income', 'NetIncome');
-  const ebitdaRow        = getRow('income', 'EBITDA');
-  const totalAssetsRow   = getRow('balance', 'TotalAssets');
-  const totalEquityRow   = getRow('balance', 'StockholdersEquity');
-  const totalDebtRow     = getRow('balance', 'TotalDebt');
-  const currentAssetsRow = getRow('balance', 'CurrentAssets');
-  const currentLiabRow   = getRow('balance', 'CurrentLiabilities');
-  const opCashFlowRow    = getRow('cashflow', 'OperatingCashFlow');
-  const fcfRow           = getRow('cashflow', 'FreeCashFlow');
+  const find = (sec, key) => (data[sec] || []).find((r) => r.key === key && r.kind === 'data');
+  const revenueRow       = find('income',   'TotalRevenue');
+  const grossProfitRow   = find('income',   'GrossProfit');
+  const opIncomeRow      = find('income',   'OperatingIncome');
+  const netIncomeRow     = find('income',   'NetIncome');
+  const ebitdaRow        = find('income',   'EBITDA');
+  const pretaxRow        = find('income',   'PretaxIncome');
+  const taxRow           = find('income',   'TaxProvision');
+  const totalAssetsRow   = find('balance',  'TotalAssets');
+  const totalEquityRow   = find('balance',  'StockholdersEquity');
+  const totalDebtRow     = find('balance',  'TotalDebt');
+  const currentAssetsRow = find('balance',  'CurrentAssets');
+  const currentLiabRow   = find('balance',  'CurrentLiabilities');
+  const opCashFlowRow    = find('cashflow', 'OperatingCashFlow');
+  const fcfRow           = find('cashflow', 'FreeCashFlow');
+  const capexRow         = find('cashflow', 'CapitalExpenditure');
 
-  const series = (nameRow, denRow, label, opts = { percent: true }) => {
-    if (!nameRow || !denRow) return null;
-    const values = nameRow.values.map((n, i) => {
+  const series = (numRow, denRow, label, opts) => {
+    if (!numRow || !denRow) return null;
+    const values = numRow.values.map((n, i) => {
       const d = denRow.values[i];
       if (n == null || d == null || d === 0) return null;
       return n / d;
     });
-    return { label, values, opts };
+    return { label, values, opts: opts || { percent: true, decimals: 2 } };
   };
 
-  const ratioRows = [
-    series(grossProfitRow,   revenueRow,     'Gross Margin'),
-    series(opIncomeRow,      revenueRow,     'Operating Margin'),
-    series(netIncomeRow,     revenueRow,     'Net Profit Margin'),
-    series(ebitdaRow,        revenueRow,     'EBITDA Margin'),
-    series(netIncomeRow,     totalEquityRow, 'ROE'),
-    series(netIncomeRow,     totalAssetsRow, 'ROA'),
-    series(totalDebtRow,     totalEquityRow, 'Debt / Equity', { compact: false, decimals: 2 }),
-    series(totalDebtRow,     totalAssetsRow, 'Debt / Assets'),
-    series(currentAssetsRow, currentLiabRow, 'Current Ratio', { compact: false, decimals: 2, suffix: 'x' }),
-    series(opCashFlowRow,    revenueRow,     'Op. Cash / Revenue'),
-    series(fcfRow,           revenueRow,     'FCF Margin'),
-  ].filter(Boolean);
-
-  if (ratioRows.length === 0) {
-    return `
-      <div class="evts-empty">
-        <div class="evts-empty__icon">◆</div>
-        <div>Not enough data to compute ratios</div>
-      </div>
-    `;
-  }
+  const groups = [
+    {
+      title: 'PROFITABILITY',
+      rows: [
+        series(grossProfitRow, revenueRow,     'Gross Margin'),
+        series(opIncomeRow,    revenueRow,     'Operating Margin'),
+        series(netIncomeRow,   revenueRow,     'Net Profit Margin'),
+        series(ebitdaRow,      revenueRow,     'EBITDA Margin'),
+      ],
+    },
+    {
+      title: 'RETURNS',
+      rows: [
+        series(netIncomeRow,   totalEquityRow, 'Return on Equity'),
+        series(netIncomeRow,   totalAssetsRow, 'Return on Assets'),
+        series(opIncomeRow,    totalAssetsRow, 'Return on Capital'),
+      ],
+    },
+    {
+      title: 'LEVERAGE & LIQUIDITY',
+      rows: [
+        series(totalDebtRow,     totalEquityRow, 'Debt / Equity', { compact: false, decimals: 2, suffix: 'x' }),
+        series(totalDebtRow,     totalAssetsRow, 'Debt / Assets'),
+        series(currentAssetsRow, currentLiabRow, 'Current Ratio', { compact: false, decimals: 2, suffix: 'x' }),
+        series(taxRow,           pretaxRow,      'Effective Tax Rate'),
+      ],
+    },
+    {
+      title: 'CASH FLOW',
+      rows: [
+        series(opCashFlowRow,    revenueRow,      'OCF / Revenue'),
+        series(fcfRow,           revenueRow,      'FCF Margin'),
+        series(capexRow,         revenueRow,      'CapEx / Revenue'),
+        series(fcfRow,           netIncomeRow,    'FCF / Net Income'),
+      ],
+    },
+  ];
 
   const headerCells = periods.map((p) => `<th class="fa-th fa-th--num">${faFmtPeriod(p, data.period)}</th>`).join('');
 
-  const bodyRows = ratioRows.map((r) => {
-    const cells = r.values.map((v) => {
-      if (v == null) return `<td class="fa-td fa-td--num fa-cell--empty">—</td>`;
-      const isPct = r.opts.percent !== false && !r.opts.suffix;
-      const fmt = isPct
-        ? faFmtNum(v, { percent: true, decimals: 2 })
-        : faFmtNum(v, r.opts);
-      const cls = v < 0 ? 'fa-td fa-td--num fa-neg' : 'fa-td fa-td--num';
-      return `<td class="${cls}">${fmt}</td>`;
-    }).join('');
-    return `
-      <tr class="fa-row">
-        <td class="fa-td fa-td--label">${escHtml(r.label)}</td>
-        ${cells}
-      </tr>
-    `;
-  }).join('');
+  const buildBody = () => {
+    let html = '';
+    for (const group of groups) {
+      const validRows = group.rows.filter(Boolean);
+      if (validRows.length === 0) continue;
+      html += `
+        <tr class="fa-row fa-row--header">
+          <td class="fa-td fa-td--label fa-td--section" colspan="${periods.length + 1}">— ${group.title} —</td>
+        </tr>
+      `;
+      for (const r of validRows) {
+        const cells = r.values.map((v) => {
+          if (v == null) return `<td class="fa-td fa-td--num fa-cell--empty">—</td>`;
+          const isPct = r.opts.percent && !r.opts.suffix;
+          const fmt = isPct
+            ? faFmtNum(v, { percent: true, decimals: r.opts.decimals || 2 })
+            : faFmtNum(v, r.opts);
+          const cls = v < 0 ? 'fa-td fa-td--num fa-neg' : 'fa-td fa-td--num';
+          return `<td class="${cls}">${fmt}</td>`;
+        }).join('');
+        html += `
+          <tr class="fa-row fa-row--computed">
+            <td class="fa-td fa-td--label fa-td--derived">${escHtml(r.label)}</td>
+            ${cells}
+          </tr>
+        `;
+      }
+    }
+    return html;
+  };
 
   return `
     <div class="fa-table-wrap">
@@ -3948,7 +4157,7 @@ function faRenderRatios(data) {
             ${headerCells}
           </tr>
         </thead>
-        <tbody>${bodyRows}</tbody>
+        <tbody>${buildBody()}</tbody>
       </table>
     </div>
   `;
