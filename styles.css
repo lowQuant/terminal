@@ -4759,6 +4759,156 @@ body {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════
+   VCONE — VOLATILITY CONE
+   ═══════════════════════════════════════════════════════════ */
+
+.vcone-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+}
+
+.vcone-panel .panel__body {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.vcone-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.vcone-chart-wrap {
+  flex: 1 1 0;
+  min-height: 280px;
+  padding: 14px 16px 6px;
+  position: relative;
+  display: flex;
+}
+
+.vcone-chart-wrap canvas {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+}
+
+.vcone-table-wrap {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-primary);
+  overflow-x: auto;
+  background: var(--bg-panel);
+}
+
+.vcone-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  min-width: 640px;
+}
+
+.vcone-th {
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.vcone-th--label {
+  text-align: left;
+  min-width: 80px;
+}
+
+.vcone-th--num {
+  text-align: right;
+  min-width: 80px;
+}
+
+.vcone-th--current {
+  color: var(--accent);
+}
+
+.vcone-th--iv {
+  color: var(--blue);
+}
+
+.vcone-row {
+  border-bottom: 1px solid rgba(30, 32, 48, 0.5);
+  transition: background 0.1s var(--ease);
+}
+
+.vcone-row:hover {
+  background: var(--bg-panel-hover);
+}
+
+.vcone-cell {
+  padding: 10px 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vcone-cell--label {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-family: var(--font-sans);
+}
+
+.vcone-cell--num {
+  text-align: right;
+  color: var(--text-secondary);
+}
+
+.vcone-cell--median {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.vcone-cell--current {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.vcone-cell--iv {
+  color: var(--blue);
+  font-weight: 700;
+}
+
+/* Current/IV vs median visual indicators */
+.vcone-cell--high {
+  background: rgba(255, 82, 82, 0.08);
+}
+.vcone-cell--low {
+  background: rgba(0, 230, 118, 0.08);
+}
+
+/* Responsive */
+@media (max-width: 700px) {
+  .vcone-chart-wrap {
+    min-height: 240px;
+    padding: 10px 10px 4px;
+  }
+  .vcone-table {
+    font-size: 11px;
+    min-width: 560px;
+  }
+  .vcone-cell, .vcone-th {
+    padding: 7px 8px;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    WF — WORKFLOWS
    ═══════════════════════════════════════════════════════════════════ */
