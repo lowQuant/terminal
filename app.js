@@ -5928,24 +5928,18 @@ function ivolRenderChart() {
 const vconeState = {
   excludeEarnings: true,
   years: 5,
+  // IV source: 'mid' (avg call+put), 'call' (ATM call only), 'put' (ATM put only)
+  ivSource: 'mid',
   data: null,
   chart: null,
 };
 
 function renderVCone(container) {
   container.className = 'dashboard dashboard--function';
+  // No standalone function-header: VCONE is security-affiliated, so the
+  // function code + name already live in the symbol bar fn-badge.
   container.innerHTML = `
     <div class="function-wrapper">
-      <header class="function-header">
-        <div class="function-header__title-row">
-          <div class="function-header__code">VCONE</div>
-          <div class="function-header__name">
-            <div class="function-header__name-main">Volatility Cone</div>
-            <div class="function-header__name-sub">Historical realized vs current IV — ${escHtml(state.currentTicker || '')}</div>
-          </div>
-        </div>
-      </header>
-
       <div class="function-toolbar">
         <div class="function-toolbar__label">History</div>
         <div class="range-filter" id="vcone-years-filter">
@@ -5961,6 +5955,16 @@ function renderVCone(container) {
                   data-excl="true" title="Strip first trading day after earnings releases">Exclude</button>
           <button class="country-btn ${!vconeState.excludeEarnings ? 'country-btn--active' : ''}"
                   data-excl="false">Include</button>
+        </div>
+
+        <div class="function-toolbar__label" style="margin-left:14px">IV</div>
+        <div class="range-filter" id="vcone-iv-source-filter">
+          <button class="country-btn ${vconeState.ivSource === 'mid' ? 'country-btn--active' : ''}"
+                  data-iv="mid" title="Average of ATM call and ATM put implied vol">Mid</button>
+          <button class="country-btn ${vconeState.ivSource === 'call' ? 'country-btn--active' : ''}"
+                  data-iv="call" title="ATM call implied vol only">Call</button>
+          <button class="country-btn ${vconeState.ivSource === 'put' ? 'country-btn--active' : ''}"
+                  data-iv="put" title="ATM put implied vol only">Put</button>
         </div>
 
         <div id="vcone-meta" style="margin-left:auto; font-size:11px; color:var(--text-tertiary); font-family:var(--font-mono)"></div>
@@ -6015,6 +6019,22 @@ function renderVCone(container) {
     });
   }
 
+  const ivSourceFilter = document.getElementById('vcone-iv-source-filter');
+  if (ivSourceFilter) {
+    ivSourceFilter.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-iv]');
+      if (!btn) return;
+      const src = btn.getAttribute('data-iv');
+      if (src && src !== vconeState.ivSource) {
+        vconeState.ivSource = src;
+        ivSourceFilter.querySelectorAll('button').forEach((b) => {
+          b.classList.toggle('country-btn--active', b === btn);
+        });
+        vconeLoadData();
+      }
+    });
+  }
+
   vconeLoadData();
 }
 
@@ -6044,6 +6064,7 @@ async function vconeLoadData() {
     exchange,
     years: String(vconeState.years),
     exclude_earnings: vconeState.excludeEarnings ? 'true' : 'false',
+    iv_source: vconeState.ivSource || 'mid',
   });
 
   try {
@@ -6145,22 +6166,9 @@ function vconeRenderChart() {
       pointRadius: 0,
       tension: 0.3,
     },
-    // Current realized — bright orange, emphasized
-    {
-      label: 'Current',
-      data: d.cone.map((c) => pct(c.current)),
-      borderColor: 'rgba(255, 140, 0, 1)',
-      borderWidth: 2.5,
-      backgroundColor: 'rgba(255, 140, 0, 0.1)',
-      fill: false,
-      pointRadius: 5,
-      pointHoverRadius: 7,
-      pointBackgroundColor: 'rgba(255, 140, 0, 1)',
-      pointBorderColor: '#0a0a0f',
-      pointBorderWidth: 2,
-      tension: 0.25,
-    },
-    // Current IV — bright blue
+    // Current implied volatility — bright blue, the decision driver.
+    // Current realized is kept in the table as informational context
+    // but omitted here to keep the chart focused on the IV-vs-cone read.
     {
       label: 'IV (ATM)',
       data: d.cone.map((c) => pct(c.iv)),
@@ -6260,29 +6268,42 @@ function vconeRenderTable() {
   const d = vconeState.data;
 
   const pct = (v) => v == null ? '—' : (v * 100).toFixed(1) + '%';
-  const relClass = (cur, med) => {
-    if (cur == null || med == null) return '';
-    const diff = cur - med;
-    if (Math.abs(diff) < 0.02) return '';
-    return diff > 0 ? 'vcone-cell--high' : 'vcone-cell--low';
+
+  // Sell-signal classification for IV cells:
+  //   IV > Q3        → "rich" — green, the strategy threshold
+  //   Median < IV ≤ Q3 → mid range — faint amber
+  //   IV ≤ Median    → cheap — no highlight
+  const ivSignalClass = (iv, median, q3) => {
+    if (iv == null || median == null || q3 == null) return '';
+    if (iv > q3) return 'vcone-cell--signal-rich';
+    if (iv > median) return 'vcone-cell--signal-mid';
+    return '';
   };
 
   const rows = d.cone.map((c) => {
-    const curClass = relClass(c.current, c.median);
-    const ivClass = relClass(c.iv, c.median);
+    const ivClass = ivSignalClass(c.iv, c.median, c.q3);
     return `
       <tr class="vcone-row">
         <td class="vcone-cell vcone-cell--label">${c.label}</td>
         <td class="vcone-cell vcone-cell--num">${pct(c.min)}</td>
         <td class="vcone-cell vcone-cell--num">${pct(c.q1)}</td>
         <td class="vcone-cell vcone-cell--num vcone-cell--median">${pct(c.median)}</td>
-        <td class="vcone-cell vcone-cell--num">${pct(c.q3)}</td>
+        <td class="vcone-cell vcone-cell--num vcone-cell--q3">${pct(c.q3)}</td>
         <td class="vcone-cell vcone-cell--num">${pct(c.max)}</td>
-        <td class="vcone-cell vcone-cell--num vcone-cell--current ${curClass}">${pct(c.current)}</td>
+        <td class="vcone-cell vcone-cell--num vcone-cell--current">${pct(c.current)}</td>
         <td class="vcone-cell vcone-cell--num vcone-cell--iv ${ivClass}">${pct(c.iv)}</td>
       </tr>
     `;
   }).join('');
+
+  // IV column label reflects the active source so it's obvious what's
+  // being compared to the cone (important when user switches Call / Put).
+  const src = d.ivSource || vconeState.ivSource || 'mid';
+  const ivLabel = {
+    mid: 'IV (ATM mid)',
+    call: 'IV (ATM call)',
+    put:  'IV (ATM put)',
+  }[src] || 'IV (ATM)';
 
   el.innerHTML = `
     <table class="vcone-table">
@@ -6292,10 +6313,10 @@ function vconeRenderTable() {
           <th class="vcone-th vcone-th--num">Min</th>
           <th class="vcone-th vcone-th--num">25%</th>
           <th class="vcone-th vcone-th--num">Median</th>
-          <th class="vcone-th vcone-th--num">75%</th>
+          <th class="vcone-th vcone-th--num vcone-th--q3" title="75th percentile — sell signal threshold">75%</th>
           <th class="vcone-th vcone-th--num">Max</th>
-          <th class="vcone-th vcone-th--num vcone-th--current">Current</th>
-          <th class="vcone-th vcone-th--num vcone-th--iv">IV (ATM)</th>
+          <th class="vcone-th vcone-th--num vcone-th--current" title="Most recent rolling realized volatility — informational">Current</th>
+          <th class="vcone-th vcone-th--num vcone-th--iv" title="ATM implied volatility at the expiration closest to the window">${ivLabel}</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>

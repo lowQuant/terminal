@@ -43,6 +43,7 @@ the mid of call + put IV at the strike nearest the current price.
 Endpoint::
 
     GET /api/vcone/<symbol>?exchange=&years=5&exclude_earnings=true|false
+                          &iv_source=mid|call|put
 """
 
 import math
@@ -131,9 +132,23 @@ def _get_earnings_exclude_dates(ticker: yf.Ticker, hist_index: pd.DatetimeIndex)
     return excludes
 
 
-def _fetch_atm_iv(ticker: yf.Ticker, windows: list, current_price: float) -> dict:
-    """For each window, return the mid of call/put ATM implied vol
-    at the option expiration closest to that number of trading days."""
+def _fetch_atm_iv(
+    ticker: yf.Ticker,
+    windows: list,
+    current_price: float,
+    iv_source: str = 'mid',
+) -> dict:
+    """For each window, return the ATM implied vol from the chain at
+    the expiration closest to that number of trading days.
+
+    ``iv_source`` selects which leg's IV to use:
+        'mid'  — mean of call and put ATM IV (default)
+        'call' — ATM call IV only
+        'put'  — ATM put IV only
+
+    If only one leg has a valid IV and the caller asked for the other
+    leg, we return None (we don't silently fall back to the wrong leg).
+    """
     result = {w: None for w in windows}
 
     if not current_price or current_price <= 0:
@@ -179,6 +194,19 @@ def _fetch_atm_iv(ticker: yf.Ticker, windows: list, current_price: float) -> dic
             chain_cache[exp_str] = None
         return chain_cache[exp_str]
 
+    def _atm_iv(df):
+        """Return ATM IV (float > 0) or None from a calls/puts DataFrame."""
+        if df is None or df.empty:
+            return None
+        try:
+            atm_idx = (df['strike'] - current_price).abs().idxmin()
+            iv = float(df.loc[atm_idx, 'impliedVolatility'] or 0)
+            if iv > 0 and not math.isnan(iv):
+                return iv
+        except (KeyError, ValueError, TypeError):
+            pass
+        return None
+
     for w in windows:
         best = min(exp_info, key=lambda x: abs(x[1] - w))
         exp_str, _ = best
@@ -191,24 +219,28 @@ def _fetch_atm_iv(ticker: yf.Ticker, windows: list, current_price: float) -> dic
             puts = chain.puts
         except AttributeError:
             continue
-        if calls is None or puts is None or calls.empty or puts.empty:
-            continue
 
-        try:
-            atm_call_idx = (calls['strike'] - current_price).abs().idxmin()
-            atm_put_idx = (puts['strike'] - current_price).abs().idxmin()
-            call_iv = float(calls.loc[atm_call_idx, 'impliedVolatility'] or 0)
-            put_iv = float(puts.loc[atm_put_idx, 'impliedVolatility'] or 0)
-            vals = [v for v in (call_iv, put_iv) if v > 0 and not math.isnan(v)]
+        call_iv = _atm_iv(calls)
+        put_iv = _atm_iv(puts)
+
+        if iv_source == 'call':
+            result[w] = call_iv
+        elif iv_source == 'put':
+            result[w] = put_iv
+        else:  # 'mid'
+            vals = [v for v in (call_iv, put_iv) if v is not None]
             if vals:
                 result[w] = sum(vals) / len(vals)
-        except (KeyError, ValueError, TypeError):
-            continue
 
     return result
 
 
-def _compute_cone(yf_ticker: str, years: int, exclude_earnings: bool) -> dict:
+def _compute_cone(
+    yf_ticker: str,
+    years: int,
+    exclude_earnings: bool,
+    iv_source: str = 'mid',
+) -> dict:
     t = yf.Ticker(yf_ticker)
 
     end_date = datetime.now()
@@ -292,7 +324,11 @@ def _compute_cone(yf_ticker: str, years: int, exclude_earnings: bool) -> dict:
         or info.get('previousClose')
     )
 
-    iv_by_window = _fetch_atm_iv(t, WINDOWS, float(current_price) if current_price else 0.0)
+    iv_by_window = _fetch_atm_iv(
+        t, WINDOWS,
+        float(current_price) if current_price else 0.0,
+        iv_source=iv_source,
+    )
     for entry in cone:
         entry['iv'] = iv_by_window.get(entry['window'])
 
@@ -303,6 +339,7 @@ def _compute_cone(yf_ticker: str, years: int, exclude_earnings: bool) -> dict:
         'windows': WINDOWS,
         'cone': cone,
         'excludeEarnings': exclude_earnings,
+        'ivSource': iv_source,
         'earningsExcluded': excluded_count,
         'earningsExcludedDates': excluded_dates[-12:] if excluded_dates else [],
         'totalObservations': total_obs,
@@ -325,12 +362,21 @@ def api_vcone(symbol):
         years = 5
     years = max(1, min(years, 10))
 
+    iv_source = (request.args.get('iv_source') or 'mid').strip().lower()
+    if iv_source not in ('mid', 'call', 'put'):
+        iv_source = 'mid'
+
     try:
         def fetch():
             yf_ticker = to_yfinance_ticker(exchange, symbol) if exchange else symbol
-            return _compute_cone(yf_ticker, years=years, exclude_earnings=exclude_earnings)
+            return _compute_cone(
+                yf_ticker,
+                years=years,
+                exclude_earnings=exclude_earnings,
+                iv_source=iv_source,
+            )
 
-        cache_key = f'vcone_{exchange}_{symbol}_{years}_{int(exclude_earnings)}'
+        cache_key = f'vcone_{exchange}_{symbol}_{years}_{int(exclude_earnings)}_{iv_source}'
         data = cached(cache_key, fetch)
         if data is None:
             return jsonify({'error': f'Could not fetch history or insufficient data for {symbol}'}), 404

@@ -4876,9 +4876,19 @@ body {
   font-weight: 600;
 }
 
+/* Current — informational only, no sell-signal tint */
 .vcone-cell--current {
-  color: var(--accent);
-  font-weight: 700;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* 75th percentile — emphasized since it's the sell-signal threshold */
+.vcone-cell--q3 {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.vcone-th--q3 {
+  color: var(--text-secondary);
 }
 
 .vcone-cell--iv {
@@ -4886,12 +4896,14 @@ body {
   font-weight: 700;
 }
 
-/* Current/IV vs median visual indicators */
-.vcone-cell--high {
-  background: rgba(255, 82, 82, 0.08);
+/* IV vs historical-realized cone — sell-signal tinting
+   (matches the short-vol strategy: sell only when IV > 75 pct realized) */
+.vcone-cell--signal-rich {
+  background: rgba(0, 230, 118, 0.15);
+  color: var(--green);
 }
-.vcone-cell--low {
-  background: rgba(0, 230, 118, 0.08);
+.vcone-cell--signal-mid {
+  background: rgba(255, 215, 64, 0.08);
 }
 
 /* Responsive */
