@@ -357,6 +357,14 @@ const FUNCTIONS = [
     stockSpecific: true,
   },
   {
+    code: 'VCONE',
+    name: 'Volatility Cone',
+    desc: 'Historical realized vol distribution vs current IV',
+    aliases: ['VCONE', 'VOLCONE', 'VCON', 'HV'],
+    implemented: true,
+    stockSpecific: true,
+  },
+  {
     code: 'WF',
     name: 'Workflows',
     desc: 'Agentic research workflows — chain functions with Claude analysis',
@@ -530,6 +538,7 @@ function openFunction(code) {
     case 'EQS':  renderEquityScreener(dashboard); break;
     case 'OMON': renderOMON(dashboard); break;
     case 'IVOL': renderIVOL(dashboard); break;
+    case 'VCONE': renderVCone(dashboard); break;
     case 'WF':   renderWorkflowHub(dashboard); break;
     case 'IMAP': renderIMAP(dashboard); break;
   }
@@ -5905,4 +5914,391 @@ function ivolRenderChart() {
       },
     },
   });
+}
+
+
+// ═══════════════════════════════════════
+// VCONE — VOLATILITY CONE
+// Historical realized-vol distribution (min, Q1, median, Q3, max)
+// across multiple rolling windows, overlaid with current realized
+// and current ATM implied volatility. Optional earnings-day
+// exclusion strips the single-day gap from earnings releases.
+// ═══════════════════════════════════════
+
+const vconeState = {
+  excludeEarnings: true,
+  years: 5,
+  data: null,
+  chart: null,
+};
+
+function renderVCone(container) {
+  container.className = 'dashboard dashboard--function';
+  container.innerHTML = `
+    <div class="function-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">VCONE</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">Volatility Cone</div>
+            <div class="function-header__name-sub">Historical realized vs current IV — ${escHtml(state.currentTicker || '')}</div>
+          </div>
+        </div>
+      </header>
+
+      <div class="function-toolbar">
+        <div class="function-toolbar__label">History</div>
+        <div class="range-filter" id="vcone-years-filter">
+          ${[1, 2, 5, 10].map((y) => `
+            <button class="country-btn ${y === vconeState.years ? 'country-btn--active' : ''}"
+                    data-years="${y}">${y}y</button>
+          `).join('')}
+        </div>
+
+        <div class="function-toolbar__label" style="margin-left:14px">Earnings</div>
+        <div class="range-filter" id="vcone-earnings-filter">
+          <button class="country-btn ${vconeState.excludeEarnings ? 'country-btn--active' : ''}"
+                  data-excl="true" title="Strip first trading day after earnings releases">Exclude</button>
+          <button class="country-btn ${!vconeState.excludeEarnings ? 'country-btn--active' : ''}"
+                  data-excl="false">Include</button>
+        </div>
+
+        <div id="vcone-meta" style="margin-left:auto; font-size:11px; color:var(--text-tertiary); font-family:var(--font-mono)"></div>
+      </div>
+
+      <div class="panel function-panel vcone-panel">
+        <div class="panel__body vcone-body">
+          <div class="vcone-chart-wrap">
+            <canvas id="vcone-canvas"></canvas>
+          </div>
+          <div class="vcone-table-wrap" id="vcone-table">
+            <div class="evts-loading">
+              <div class="search-loading__spinner"></div>
+              <span>Computing volatility cone…</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Wire toolbar
+  const yearsFilter = document.getElementById('vcone-years-filter');
+  if (yearsFilter) {
+    yearsFilter.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-years]');
+      if (!btn) return;
+      const y = parseInt(btn.getAttribute('data-years'), 10);
+      if (y && y !== vconeState.years) {
+        vconeState.years = y;
+        yearsFilter.querySelectorAll('button').forEach((b) => {
+          b.classList.toggle('country-btn--active', b === btn);
+        });
+        vconeLoadData();
+      }
+    });
+  }
+
+  const earningsFilter = document.getElementById('vcone-earnings-filter');
+  if (earningsFilter) {
+    earningsFilter.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-excl]');
+      if (!btn) return;
+      const excl = btn.getAttribute('data-excl') === 'true';
+      if (excl !== vconeState.excludeEarnings) {
+        vconeState.excludeEarnings = excl;
+        earningsFilter.querySelectorAll('button').forEach((b) => {
+          b.classList.toggle('country-btn--active', b === btn);
+        });
+        vconeLoadData();
+      }
+    });
+  }
+
+  vconeLoadData();
+}
+
+async function vconeLoadData() {
+  const ticker = state.currentTicker || '';
+  const exchange = state.currentExchange || '';
+  if (!ticker) return;
+
+  // Clear + show loading
+  const tableEl = document.getElementById('vcone-table');
+  if (tableEl) {
+    tableEl.innerHTML = `
+      <div class="evts-loading">
+        <div class="search-loading__spinner"></div>
+        <span>Computing volatility cone…</span>
+      </div>
+    `;
+  }
+
+  // Destroy any existing chart instance
+  if (vconeState.chart) {
+    try { vconeState.chart.destroy(); } catch (e) { /* ok */ }
+    vconeState.chart = null;
+  }
+
+  const params = new URLSearchParams({
+    exchange,
+    years: String(vconeState.years),
+    exclude_earnings: vconeState.excludeEarnings ? 'true' : 'false',
+  });
+
+  try {
+    const resp = await fetch(`/api/vcone/${encodeURIComponent(ticker)}?${params}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    vconeState.data = data;
+  } catch (e) {
+    if (tableEl) {
+      tableEl.innerHTML = `
+        <div class="evts-empty">
+          <div class="evts-empty__icon">⚠</div>
+          <div>Could not compute volatility cone</div>
+          <div class="text-muted" style="font-size:11px; margin-top:4px">${escHtml(String(e.message || e))}</div>
+        </div>
+      `;
+    }
+    return;
+  }
+
+  vconeRenderChart();
+  vconeRenderTable();
+  vconeRenderMeta();
+}
+
+function vconeRenderMeta() {
+  const el = document.getElementById('vcone-meta');
+  if (!el || !vconeState.data) return;
+  const d = vconeState.data;
+  const parts = [
+    `${d.totalObservations} obs · ${d.startDate} → ${d.endDate}`,
+  ];
+  if (d.excludeEarnings && d.earningsExcluded > 0) {
+    parts.push(`${d.earningsExcluded} earnings days excluded`);
+  }
+  el.textContent = parts.join(' · ');
+}
+
+function vconeRenderChart() {
+  const canvas = document.getElementById('vcone-canvas');
+  if (!canvas || !vconeState.data) return;
+  const d = vconeState.data;
+
+  const labels = d.cone.map((c) => c.label);
+  const pct = (v) => v == null ? null : +(v * 100).toFixed(2);
+
+  // Cone percentile lines (gray gradient)
+  const datasets = [
+    {
+      label: 'Max',
+      data: d.cone.map((c) => pct(c.max)),
+      borderColor: 'rgba(138, 140, 160, 0.55)',
+      borderDash: [6, 4],
+      borderWidth: 1.5,
+      backgroundColor: 'rgba(138, 140, 160, 0.08)',
+      fill: '+1',                     // fill toward next dataset (Q3)
+      pointRadius: 0,
+      tension: 0.3,
+    },
+    {
+      label: '75%',
+      data: d.cone.map((c) => pct(c.q3)),
+      borderColor: 'rgba(138, 140, 160, 0.75)',
+      borderWidth: 1.5,
+      backgroundColor: 'rgba(138, 140, 160, 0.14)',
+      fill: '+1',                     // fill toward Median
+      pointRadius: 0,
+      tension: 0.3,
+    },
+    {
+      label: 'Median',
+      data: d.cone.map((c) => pct(c.median)),
+      borderColor: 'rgba(232, 232, 240, 0.9)',
+      borderWidth: 2,
+      backgroundColor: 'transparent',
+      fill: false,
+      pointRadius: 3,
+      pointBackgroundColor: 'rgba(232, 232, 240, 1)',
+      tension: 0.3,
+    },
+    {
+      label: '25%',
+      data: d.cone.map((c) => pct(c.q1)),
+      borderColor: 'rgba(138, 140, 160, 0.75)',
+      borderWidth: 1.5,
+      backgroundColor: 'rgba(138, 140, 160, 0.14)',
+      fill: '+1',                     // fill toward Min
+      pointRadius: 0,
+      tension: 0.3,
+    },
+    {
+      label: 'Min',
+      data: d.cone.map((c) => pct(c.min)),
+      borderColor: 'rgba(138, 140, 160, 0.55)',
+      borderDash: [6, 4],
+      borderWidth: 1.5,
+      backgroundColor: 'rgba(138, 140, 160, 0.08)',
+      fill: false,
+      pointRadius: 0,
+      tension: 0.3,
+    },
+    // Current realized — bright orange, emphasized
+    {
+      label: 'Current',
+      data: d.cone.map((c) => pct(c.current)),
+      borderColor: 'rgba(255, 140, 0, 1)',
+      borderWidth: 2.5,
+      backgroundColor: 'rgba(255, 140, 0, 0.1)',
+      fill: false,
+      pointRadius: 5,
+      pointHoverRadius: 7,
+      pointBackgroundColor: 'rgba(255, 140, 0, 1)',
+      pointBorderColor: '#0a0a0f',
+      pointBorderWidth: 2,
+      tension: 0.25,
+    },
+    // Current IV — bright blue
+    {
+      label: 'IV (ATM)',
+      data: d.cone.map((c) => pct(c.iv)),
+      borderColor: 'rgba(68, 138, 255, 1)',
+      borderWidth: 2,
+      borderDash: [2, 2],
+      backgroundColor: 'rgba(68, 138, 255, 0.1)',
+      fill: false,
+      pointRadius: 5,
+      pointHoverRadius: 7,
+      pointBackgroundColor: 'rgba(68, 138, 255, 1)',
+      pointBorderColor: '#0a0a0f',
+      pointBorderWidth: 2,
+      pointStyle: 'rectRot',
+      tension: 0.25,
+    },
+  ];
+
+  const ctx = canvas.getContext('2d');
+
+  if (vconeState.chart) {
+    try { vconeState.chart.destroy(); } catch (e) { /* ok */ }
+    vconeState.chart = null;
+  }
+
+  vconeState.chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 350 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: {
+            color: '#8a8f98',
+            font: { family: "'Inter', sans-serif", size: 11 },
+            usePointStyle: true,
+            padding: 14,
+            filter: (item) => item.text !== 'Max' && item.text !== 'Min',  // declutter
+          },
+        },
+        tooltip: {
+          backgroundColor: 'rgba(15, 16, 24, 0.95)',
+          titleColor: '#e8e8f0',
+          bodyColor: '#e8e8f0',
+          borderColor: 'rgba(255, 140, 0, 0.3)',
+          borderWidth: 1,
+          callbacks: {
+            label: (ctx) => {
+              const v = ctx.parsed.y;
+              if (v == null) return `${ctx.dataset.label}: —`;
+              return `${ctx.dataset.label}: ${v.toFixed(1)}%`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: 'Lookback Window',
+            color: '#8a8f98',
+            font: { family: "'Inter', sans-serif", size: 11 },
+          },
+          ticks: {
+            color: '#8a8f98',
+            font: { family: "'JetBrains Mono', monospace", size: 11 },
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+        },
+        y: {
+          title: {
+            display: true,
+            text: 'Annualized Volatility (%)',
+            color: '#8a8f98',
+            font: { family: "'Inter', sans-serif", size: 11 },
+          },
+          ticks: {
+            color: '#6a6f78',
+            font: { family: "'JetBrains Mono', monospace", size: 10 },
+            callback: (v) => Number(v).toFixed(0) + '%',
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          beginAtZero: true,
+        },
+      },
+    },
+  });
+}
+
+function vconeRenderTable() {
+  const el = document.getElementById('vcone-table');
+  if (!el || !vconeState.data) return;
+  const d = vconeState.data;
+
+  const pct = (v) => v == null ? '—' : (v * 100).toFixed(1) + '%';
+  const relClass = (cur, med) => {
+    if (cur == null || med == null) return '';
+    const diff = cur - med;
+    if (Math.abs(diff) < 0.02) return '';
+    return diff > 0 ? 'vcone-cell--high' : 'vcone-cell--low';
+  };
+
+  const rows = d.cone.map((c) => {
+    const curClass = relClass(c.current, c.median);
+    const ivClass = relClass(c.iv, c.median);
+    return `
+      <tr class="vcone-row">
+        <td class="vcone-cell vcone-cell--label">${c.label}</td>
+        <td class="vcone-cell vcone-cell--num">${pct(c.min)}</td>
+        <td class="vcone-cell vcone-cell--num">${pct(c.q1)}</td>
+        <td class="vcone-cell vcone-cell--num vcone-cell--median">${pct(c.median)}</td>
+        <td class="vcone-cell vcone-cell--num">${pct(c.q3)}</td>
+        <td class="vcone-cell vcone-cell--num">${pct(c.max)}</td>
+        <td class="vcone-cell vcone-cell--num vcone-cell--current ${curClass}">${pct(c.current)}</td>
+        <td class="vcone-cell vcone-cell--num vcone-cell--iv ${ivClass}">${pct(c.iv)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  el.innerHTML = `
+    <table class="vcone-table">
+      <thead>
+        <tr>
+          <th class="vcone-th vcone-th--label">Window</th>
+          <th class="vcone-th vcone-th--num">Min</th>
+          <th class="vcone-th vcone-th--num">25%</th>
+          <th class="vcone-th vcone-th--num">Median</th>
+          <th class="vcone-th vcone-th--num">75%</th>
+          <th class="vcone-th vcone-th--num">Max</th>
+          <th class="vcone-th vcone-th--num vcone-th--current">Current</th>
+          <th class="vcone-th vcone-th--num vcone-th--iv">IV (ATM)</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
 }
