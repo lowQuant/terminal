@@ -6468,6 +6468,15 @@ body {
   font-style: italic;
 }
 
+.tour-tip__note {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  border-left: 2px solid var(--accent-dim);
+  padding: 4px 0 4px 10px;
+  margin-top: 6px !important;
+  background: rgba(255, 140, 0, 0.03);
+}
+
 .tour-tip__list {
   list-style: none;
   padding: 0;
