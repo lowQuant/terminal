@@ -56,15 +56,14 @@
     {
       target: '#ticker-tape',
       placement: 'bottom',
-      title: 'Market Pulse',
+      title: 'Live Ticker Tape',
       body: `
-        <p>A glanceable feed of major indices, FX, crypto, and
-        mega-caps — refreshed live via TradingView. Use it as a pulse
-        check while you work.</p>
-        <p class="tour-tip__note">Heads up: clicking a symbol here
-        opens it on TradingView in a new tab — this widget doesn't
-        load symbols into the terminal. To load a ticker, use the
-        search bar above.</p>
+        <p>Live quotes stream across the top. <b>Click any ticker</b>
+        to load it straight into the terminal — no external redirects.</p>
+        <p>Hit the <span class="kbd">⚙</span> on the right edge to
+        customize. You can curate your own list, or flip the tape to
+        <b>mirror your active watchlist</b> so the symbols you track
+        are always in view.</p>
       `,
     },
     {
@@ -76,12 +75,10 @@
         and the current function badge stay visible so you always
         know what you're looking at.</p>
         <p>Press <span class="kbd">Esc</span> to focus the ticker
-        field, type a new symbol, and hit
-        <span class="kbd">Enter</span> to swap without leaving the
-        current function.</p>
-        <p class="tour-tip__note">The inline field only accepts ticker
-        codes right now — use the header search if you want company
-        names, autosuggestions, or to jump to a function.</p>
+        field, then type a <b>ticker</b> or a <b>company name</b> —
+        live autosuggestions appear below. Use the arrow keys to
+        highlight a match and <span class="kbd">Enter</span> to swap
+        without leaving the current function.</p>
       `,
       prep: ensureDemoSymbol,
     },
