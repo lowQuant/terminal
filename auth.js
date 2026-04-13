@@ -130,6 +130,12 @@ function showTerminal(user) {
   if (typeof initTerminal === 'function') {
     initTerminal();
   }
+
+  // First-time users: show the onboarding tour (defined in tour.js).
+  // Returning users can replay it any time via F1.
+  if (typeof window.maybeStartTour === 'function') {
+    window.maybeStartTour();
+  }
 }
 
 function showWelcome() {
