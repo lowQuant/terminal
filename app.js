@@ -5339,18 +5339,10 @@ const omonState = {
 
 function renderOMON(container) {
   container.className = 'dashboard dashboard--function';
+  // No standalone function-header: OMON is security-affiliated so the
+  // function code + name already appear in the symbol bar fn-badge.
   container.innerHTML = `
     <div class="function-wrapper">
-      <header class="function-header">
-        <div class="function-header__title-row">
-          <div class="function-header__code">OMON</div>
-          <div class="function-header__name">
-            <div class="function-header__name-main">Options Monitor</div>
-            <div class="function-header__name-sub">Options chain with Greeks &amp; volume — ${escHtml(state.currentTicker || '')}</div>
-          </div>
-        </div>
-      </header>
-
       <div class="function-toolbar">
         <div class="function-toolbar__label">Expiry</div>
         <div class="omon-expiry-pills" id="omon-expiry-pills">
@@ -5657,18 +5649,10 @@ const IVOL_COLORS = [
 
 function renderIVOL(container) {
   container.className = 'dashboard dashboard--function';
+  // No standalone function-header: IVOL is security-affiliated so the
+  // function code + name already appear in the symbol bar fn-badge.
   container.innerHTML = `
     <div class="function-wrapper">
-      <header class="function-header">
-        <div class="function-header__title-row">
-          <div class="function-header__code">IVOL</div>
-          <div class="function-header__name">
-            <div class="function-header__name-main">Options Volatility</div>
-            <div class="function-header__name-sub">Implied volatility smile &amp; skew curves — ${escHtml(state.currentTicker || '')}</div>
-          </div>
-        </div>
-      </header>
-
       <div class="function-toolbar">
         <div class="function-toolbar__label">Expirations</div>
         <div class="omon-expiry-pills" id="ivol-expiry-pills">
