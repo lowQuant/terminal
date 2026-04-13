@@ -14,6 +14,7 @@ from flask import Blueprint, jsonify
 
 from functions.eco import eco_bp
 from functions.evts import evts_bp
+from functions.fa import fa_bp
 from functions.fx import fx_bp
 from functions.most import most_bp
 from functions.mov import mov_bp
@@ -50,6 +51,7 @@ ALL_BLUEPRINTS = [
     _shared_bp,
     eco_bp,
     evts_bp,
+    fa_bp,
     fx_bp,
     most_bp,
     mov_bp,

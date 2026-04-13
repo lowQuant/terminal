@@ -401,11 +401,41 @@ const FUNCTIONS = [
   {
     code: 'FA',
     name: 'Financial Analysis',
-    desc: 'Financial statements & ratios',
+    desc: 'Financial statements & ratios — Highlights · IS · BS · CF · Ratios',
     aliases: ['FA', 'FINANCIALS'],
     implemented: true,
     stockSpecific: true,
     tabTarget: 'financials',
+  },
+  {
+    code: 'IS',
+    name: 'Income Statement',
+    desc: 'Revenue, expenses, net income',
+    aliases: ['IS', 'INCOME', 'PNL'],
+    implemented: true,
+    stockSpecific: true,
+    tabTarget: 'financials',
+    faSubTab: 'income',
+  },
+  {
+    code: 'BS',
+    name: 'Balance Sheet',
+    desc: 'Assets, liabilities, equity',
+    aliases: ['BS', 'BALANCESHEET', 'BALANCE'],
+    implemented: true,
+    stockSpecific: true,
+    tabTarget: 'financials',
+    faSubTab: 'balance',
+  },
+  {
+    code: 'CF',
+    name: 'Cash Flow',
+    desc: 'Operating, investing, financing cash flows',
+    aliases: ['CF', 'CASHFLOW'],
+    implemented: true,
+    stockSpecific: true,
+    tabTarget: 'financials',
+    faSubTab: 'cashflow',
   },
 ];
 
@@ -440,6 +470,13 @@ function openFunction(code) {
   // Tab shortcut functions — route to the stock tab instead of a function view
   if (fn.tabTarget) {
     state.activeFunction = null;
+
+    // FA sub-tab targeting: when IS/BS/CF are invoked, pre-set the FA
+    // active tab so the financials view opens directly on that section.
+    if (fn.faSubTab && typeof faState !== 'undefined') {
+      faState.activeTab = fn.faSubTab;
+    }
+
     setActiveTab(fn.tabTarget);
 
     // Show function badge merged with the security header in the symbol bar
@@ -3422,22 +3459,499 @@ function closeArticleModal() {
 // FINANCIALS TAB
 // ═══════════════════════════════════════
 
+// ═══════════════════════════════════════
+// FA — FINANCIAL ANALYSIS
+// Bloomberg-style Highlights / IS / BS / CF / Ratios with
+// period (annual/quarterly) and display-currency toggles.
+// ═══════════════════════════════════════
+
+const FA_TABS = [
+  { key: 'highlights', label: 'Highlights' },
+  { key: 'income',     label: 'Income Statement' },
+  { key: 'balance',    label: 'Balance Sheet' },
+  { key: 'cashflow',   label: 'Cash Flow' },
+  { key: 'ratios',     label: 'Ratios' },
+];
+
+const faState = {
+  period: 'annual',        // 'annual' | 'quarterly'
+  ccy: null,               // null = native currency, or 'USD' etc.
+  activeTab: 'highlights',
+  data: null,              // latest API response
+  loading: false,
+  error: null,
+  currencies: null,        // cached list from /api/fa/currencies
+};
+
 function renderFinancials(container) {
-  container.className = 'dashboard dashboard--full';
+  // Reset data cache when ticker changes; keep active tab (may have been
+  // pre-set by IS / BS / CF sub-tab shortcuts in openFunction()).
+  if (faState._lastSymbol !== state.currentSymbol) {
+    faState.activeTab = faState.activeTab || 'highlights';
+    faState.data = null;
+    faState.error = null;
+    faState._lastSymbol = state.currentSymbol;
+  }
+  if (!faState.activeTab) faState.activeTab = 'highlights';
+
+  container.className = 'dashboard dashboard--function';
   container.innerHTML = `
-    <div class="panel">
-      <div class="panel__header">
-        <div class="panel__title"><span class="panel__title-dot"></span> Financials — ${state.currentSymbol}</div>
-        <div class="panel__actions">
-          <span class="panel__title text-muted" style="font-size: 9px; letter-spacing: 0.5px;">
-            Income Statement · Balance Sheet · Cash Flow · Quarterly / Annual
-          </span>
+    <div class="function-wrapper" id="fa-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">FA</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">Financial Analysis</div>
+            <div class="function-header__name-sub" id="fa-subtitle">
+              Income statement, balance sheet, cash flow &amp; ratios — ${escHtml(state.currentTicker || '')}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div class="function-toolbar">
+        <div class="function-toolbar__label">Period</div>
+        <div class="range-filter" id="fa-period-filter">
+          <button class="country-btn ${faState.period === 'annual' ? 'country-btn--active' : ''}"
+                  data-period="annual">Annual</button>
+          <button class="country-btn ${faState.period === 'quarterly' ? 'country-btn--active' : ''}"
+                  data-period="quarterly">Quarterly</button>
+        </div>
+
+        <div class="function-toolbar__label" style="margin-left:14px">Currency</div>
+        <select class="evts-country-select" id="fa-ccy-select" style="min-width:110px">
+          <option value="">Native</option>
+        </select>
+
+        <div class="fa-toolbar__info" id="fa-toolbar-info" style="margin-left:auto; font-size:11px; color:var(--text-tertiary); font-family:var(--font-mono)"></div>
+      </div>
+
+      <nav class="fa-tabs" id="fa-tabs">
+        ${FA_TABS.map((t) => `
+          <button class="fa-tab ${t.key === faState.activeTab ? 'fa-tab--active' : ''}"
+                  data-fa-tab="${t.key}">${t.label}</button>
+        `).join('')}
+      </nav>
+
+      <div class="panel function-panel fa-panel">
+        <div class="panel__body" id="fa-body">
+          <div class="evts-loading">
+            <div class="search-loading__spinner"></div>
+            <span>Loading financial data…</span>
+          </div>
         </div>
       </div>
-      <div class="panel__body" id="financials-container"></div>
     </div>
   `;
-  injectFinancials('financials-container', state.currentSymbol);
+
+  // Wire period toggle
+  const periodFilter = document.getElementById('fa-period-filter');
+  if (periodFilter) {
+    periodFilter.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-period]');
+      if (!btn) return;
+      const p = btn.getAttribute('data-period');
+      if (p && p !== faState.period) {
+        faState.period = p;
+        periodFilter.querySelectorAll('button').forEach((b) => {
+          b.classList.toggle('country-btn--active', b === btn);
+        });
+        faLoadData();
+      }
+    });
+  }
+
+  // Wire currency selector
+  const ccySelect = document.getElementById('fa-ccy-select');
+  if (ccySelect) {
+    ccySelect.addEventListener('change', (e) => {
+      const v = e.target.value;
+      faState.ccy = v || null;
+      faLoadData();
+    });
+  }
+
+  // Wire tab switching — rerenders only the body
+  const tabsEl = document.getElementById('fa-tabs');
+  if (tabsEl) {
+    tabsEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-fa-tab]');
+      if (!btn) return;
+      const tabKey = btn.getAttribute('data-fa-tab');
+      if (tabKey === faState.activeTab) return;
+      faState.activeTab = tabKey;
+      tabsEl.querySelectorAll('.fa-tab').forEach((b) => {
+        b.classList.toggle('fa-tab--active', b === btn);
+      });
+      faRenderBody();
+    });
+  }
+
+  // Populate currency dropdown then load data
+  faLoadCurrencies().then(() => faLoadData());
+}
+
+async function faLoadCurrencies() {
+  if (faState.currencies) {
+    faPopulateCurrencySelect();
+    return;
+  }
+  try {
+    const resp = await fetch('/api/fa/currencies');
+    const data = await resp.json();
+    faState.currencies = data.currencies || ['USD', 'EUR', 'GBP', 'JPY', 'CHF'];
+  } catch (e) {
+    faState.currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CHF'];
+  }
+  faPopulateCurrencySelect();
+}
+
+function faPopulateCurrencySelect() {
+  const sel = document.getElementById('fa-ccy-select');
+  if (!sel) return;
+  const current = faState.ccy || '';
+  sel.innerHTML = '<option value="">Native</option>' +
+    faState.currencies.map((c) => `<option value="${c}" ${c === current ? 'selected' : ''}>${c}</option>`).join('');
+}
+
+async function faLoadData() {
+  const body = document.getElementById('fa-body');
+  if (body) {
+    body.innerHTML = `
+      <div class="evts-loading">
+        <div class="search-loading__spinner"></div>
+        <span>Loading ${faState.period} data…</span>
+      </div>
+    `;
+  }
+
+  faState.loading = true;
+  faState.error = null;
+
+  const exchange = state.currentExchange || '';
+  const ticker = state.currentTicker || '';
+  if (!ticker) {
+    faState.loading = false;
+    if (body) body.innerHTML = '<div class="evts-empty"><div class="evts-empty__icon">◆</div><div>Load a ticker to see financial data</div></div>';
+    return;
+  }
+
+  const params = new URLSearchParams({
+    exchange,
+    period: faState.period,
+  });
+  if (faState.ccy) params.set('ccy', faState.ccy);
+
+  try {
+    const resp = await fetch(`/api/fa/statements/${encodeURIComponent(ticker)}?${params}`);
+    const data = await resp.json();
+    if (data.error) {
+      throw new Error(data.error);
+    }
+    faState.data = data;
+  } catch (e) {
+    faState.error = String(e.message || e);
+  } finally {
+    faState.loading = false;
+  }
+
+  // Update toolbar info with currency + period count
+  const infoEl = document.getElementById('fa-toolbar-info');
+  if (infoEl && faState.data) {
+    const d = faState.data;
+    const ccy = d.displayCurrency || d.currency || '';
+    const periodsCount = (d.periods || []).length;
+    const converted = d.fxRate ? ` · fx ${d.fxRate.toFixed(4)}` : '';
+    infoEl.textContent = `${periodsCount} ${faState.period === 'annual' ? 'years' : 'quarters'} · ${ccy}${converted}`;
+  }
+
+  faRenderBody();
+}
+
+function faRenderBody() {
+  const body = document.getElementById('fa-body');
+  if (!body) return;
+
+  if (faState.error) {
+    body.innerHTML = `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">⚠</div>
+        <div>Could not load financial data</div>
+        <div class="text-muted" style="font-size:11px; margin-top:4px">${escHtml(faState.error)}</div>
+      </div>
+    `;
+    return;
+  }
+  if (!faState.data) return;
+
+  const tab = faState.activeTab;
+  switch (tab) {
+    case 'highlights': body.innerHTML = faRenderHighlights(faState.data); break;
+    case 'income':     body.innerHTML = faRenderStatement(faState.data, 'income',   'Income Statement'); break;
+    case 'balance':    body.innerHTML = faRenderStatement(faState.data, 'balance',  'Balance Sheet'); break;
+    case 'cashflow':   body.innerHTML = faRenderStatement(faState.data, 'cashflow', 'Cash Flow'); break;
+    case 'ratios':     body.innerHTML = faRenderRatios(faState.data); break;
+  }
+}
+
+// ── Table rendering helpers ──────────────────────────────────────
+
+function faFmtNum(v, opts = {}) {
+  if (v == null || v === undefined || Number.isNaN(v)) return '<span class="fa-cell--empty">—</span>';
+  const { decimals = null, compact = true, percent = false, suffix = '' } = opts;
+  if (percent) {
+    return `${(v * 100).toFixed(decimals != null ? decimals : 2)}%`;
+  }
+  const abs = Math.abs(v);
+  if (compact) {
+    if (abs >= 1e12) return `${(v / 1e12).toFixed(2)}T${suffix}`;
+    if (abs >= 1e9)  return `${(v / 1e9).toFixed(2)}B${suffix}`;
+    if (abs >= 1e6)  return `${(v / 1e6).toFixed(2)}M${suffix}`;
+    if (abs >= 1e3)  return `${(v / 1e3).toFixed(2)}K${suffix}`;
+  }
+  return `${v.toFixed(decimals != null ? decimals : 2)}${suffix}`;
+}
+
+function faFmtPeriod(dateStr, period) {
+  if (!dateStr) return '';
+  // dateStr is 'YYYY-MM-DD'
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const y = parts[0], m = parts[1];
+  if (period === 'quarterly') {
+    const month = parseInt(m, 10);
+    const q = Math.ceil(month / 3);
+    return `Q${q} ${y}`;
+  }
+  // Annual — show FY + short year
+  return `FY ${y}`;
+}
+
+function faRenderStatement(data, sectionKey, title) {
+  const rows = data[sectionKey] || [];
+  const periods = data.periods || [];
+  const ccy = data.displayCurrency || data.currency || '';
+
+  if (rows.length === 0 || periods.length === 0) {
+    return `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">◆</div>
+        <div>No ${title.toLowerCase()} data available</div>
+        <div class="text-muted" style="font-size:11px; margin-top:4px">yfinance did not return figures for ${escHtml(data.symbol)} (${faState.period}).</div>
+      </div>
+    `;
+  }
+
+  // Header row: "Item" + one column per period
+  const headerCells = periods.map((p) => `<th class="fa-th fa-th--num">${faFmtPeriod(p, data.period)}</th>`).join('');
+
+  // Data rows
+  const bodyRows = rows.map((row) => {
+    const isEpsRow = /EPS$/i.test(row.key) || /Shares/i.test(row.key);
+    const cells = row.values.map((v) => {
+      if (v == null) return `<td class="fa-td fa-td--num fa-cell--empty">—</td>`;
+      const fmt = isEpsRow
+        ? faFmtNum(v, { compact: false, decimals: 2 })
+        : faFmtNum(v, { compact: true });
+      const cls = v < 0 ? 'fa-td fa-td--num fa-neg' : 'fa-td fa-td--num';
+      return `<td class="${cls}">${fmt}</td>`;
+    }).join('');
+    return `
+      <tr class="fa-row">
+        <td class="fa-td fa-td--label">${escHtml(row.label)}</td>
+        ${cells}
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <div class="fa-table-wrap">
+      <table class="fa-table">
+        <thead>
+          <tr>
+            <th class="fa-th fa-th--label">Item</th>
+            ${headerCells}
+          </tr>
+          <tr class="fa-subheader">
+            <th class="fa-th fa-th--label fa-th--muted">${escHtml(title)}</th>
+            ${periods.map(() => `<th class="fa-th fa-th--muted fa-th--num">${escHtml(ccy)}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function faRenderHighlights(data) {
+  const hl = data.highlights || {};
+  const ccy = data.displayCurrency || data.currency || '';
+
+  const card = (title, items) => `
+    <div class="fa-hl-card">
+      <div class="fa-hl-card__title">${title}</div>
+      <div class="fa-hl-card__items">
+        ${items.map(([label, value, muted]) => `
+          <div class="fa-hl-item">
+            <span class="fa-hl-item__label">${label}</span>
+            <span class="fa-hl-item__value ${muted ? 'fa-hl-item__value--muted' : ''}">${value}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  const n = (v, opts) => v == null ? '—' : faFmtNum(v, opts);
+  const nMon = (v) => v == null ? '—' : `${faFmtNum(v, { compact: true })} ${ccy}`;
+  const nPct = (v) => v == null ? '—' : faFmtNum(v, { percent: true });
+  const nRat = (v) => v == null ? '—' : faFmtNum(v, { compact: false, decimals: 2, suffix: 'x' });
+
+  return `
+    <div class="fa-highlights">
+      ${card('VALUATION', [
+        ['Market Cap',         nMon(hl.marketCap)],
+        ['Enterprise Value',   nMon(hl.enterpriseValue)],
+        ['Trailing P/E',       nRat(hl.trailingPE)],
+        ['Forward P/E',        nRat(hl.forwardPE)],
+        ['PEG Ratio',          nRat(hl.pegRatio)],
+        ['Price / Book',       nRat(hl.priceToBook)],
+        ['Price / Sales',      nRat(hl.priceToSales)],
+        ['EV / Revenue',       nRat(hl.evToRevenue)],
+        ['EV / EBITDA',        nRat(hl.evToEbitda)],
+      ])}
+      ${card('PROFITABILITY', [
+        ['Gross Margin',       nPct(hl.grossMargins)],
+        ['Operating Margin',   nPct(hl.operatingMargins)],
+        ['Profit Margin',      nPct(hl.profitMargins)],
+        ['Return on Equity',   nPct(hl.returnOnEquity)],
+        ['Return on Assets',   nPct(hl.returnOnAssets)],
+      ])}
+      ${card('GROWTH (YoY)', [
+        ['Revenue Growth',     nPct(hl.revenueGrowth)],
+        ['Earnings Growth',    nPct(hl.earningsGrowth)],
+        ['Quarterly Earn. Growth', nPct(hl.earningsQuarterlyGrowth)],
+      ])}
+      ${card('FINANCIAL HEALTH', [
+        ['Total Cash',         nMon(hl.totalCash)],
+        ['Total Debt',         nMon(hl.totalDebt)],
+        ['Debt / Equity',      n(hl.debtToEquity, { compact: false, decimals: 2 })],
+        ['Current Ratio',      nRat(hl.currentRatio)],
+        ['Quick Ratio',        nRat(hl.quickRatio)],
+      ])}
+      ${card('PER-SHARE (TTM)', [
+        ['Revenue',            nMon(hl.revenue)],
+        ['Net Income',         nMon(hl.netIncome)],
+        ['EBITDA',             nMon(hl.ebitda)],
+        ['Operating Cash Flow', nMon(hl.operatingCashFlow)],
+        ['Free Cash Flow',     nMon(hl.freeCashFlow)],
+        ['Trailing EPS',       nMon(hl.trailingEps)],
+        ['Forward EPS',        nMon(hl.forwardEps)],
+        ['Book Value',         nMon(hl.bookValue)],
+      ])}
+      ${card('SHAREHOLDER', [
+        ['Dividend Yield',     nPct(hl.dividendYield)],
+        ['Payout Ratio',       nPct(hl.payoutRatio)],
+        ['Shares Outstanding', n(hl.sharesOutstanding, { compact: true })],
+        ['Float',              n(hl.floatShares, { compact: true })],
+        ['Beta',               n(hl.beta, { compact: false, decimals: 2 })],
+      ])}
+    </div>
+  `;
+}
+
+function faRenderRatios(data) {
+  const rows = data.income || [];
+  const periods = data.periods || [];
+  if (rows.length === 0 || periods.length === 0) {
+    return `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">◆</div>
+        <div>Not enough data to compute ratios</div>
+      </div>
+    `;
+  }
+
+  // Pull helper
+  const getRow = (section, key) => (data[section] || []).find((r) => r.key === key);
+  const revenueRow       = getRow('income', 'TotalRevenue');
+  const grossProfitRow   = getRow('income', 'GrossProfit');
+  const opIncomeRow      = getRow('income', 'OperatingIncome');
+  const netIncomeRow     = getRow('income', 'NetIncome');
+  const ebitdaRow        = getRow('income', 'EBITDA');
+  const totalAssetsRow   = getRow('balance', 'TotalAssets');
+  const totalEquityRow   = getRow('balance', 'StockholdersEquity');
+  const totalDebtRow     = getRow('balance', 'TotalDebt');
+  const currentAssetsRow = getRow('balance', 'CurrentAssets');
+  const currentLiabRow   = getRow('balance', 'CurrentLiabilities');
+  const opCashFlowRow    = getRow('cashflow', 'OperatingCashFlow');
+  const fcfRow           = getRow('cashflow', 'FreeCashFlow');
+
+  const series = (nameRow, denRow, label, opts = { percent: true }) => {
+    if (!nameRow || !denRow) return null;
+    const values = nameRow.values.map((n, i) => {
+      const d = denRow.values[i];
+      if (n == null || d == null || d === 0) return null;
+      return n / d;
+    });
+    return { label, values, opts };
+  };
+
+  const ratioRows = [
+    series(grossProfitRow,   revenueRow,     'Gross Margin'),
+    series(opIncomeRow,      revenueRow,     'Operating Margin'),
+    series(netIncomeRow,     revenueRow,     'Net Profit Margin'),
+    series(ebitdaRow,        revenueRow,     'EBITDA Margin'),
+    series(netIncomeRow,     totalEquityRow, 'ROE'),
+    series(netIncomeRow,     totalAssetsRow, 'ROA'),
+    series(totalDebtRow,     totalEquityRow, 'Debt / Equity', { compact: false, decimals: 2 }),
+    series(totalDebtRow,     totalAssetsRow, 'Debt / Assets'),
+    series(currentAssetsRow, currentLiabRow, 'Current Ratio', { compact: false, decimals: 2, suffix: 'x' }),
+    series(opCashFlowRow,    revenueRow,     'Op. Cash / Revenue'),
+    series(fcfRow,           revenueRow,     'FCF Margin'),
+  ].filter(Boolean);
+
+  if (ratioRows.length === 0) {
+    return `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">◆</div>
+        <div>Not enough data to compute ratios</div>
+      </div>
+    `;
+  }
+
+  const headerCells = periods.map((p) => `<th class="fa-th fa-th--num">${faFmtPeriod(p, data.period)}</th>`).join('');
+
+  const bodyRows = ratioRows.map((r) => {
+    const cells = r.values.map((v) => {
+      if (v == null) return `<td class="fa-td fa-td--num fa-cell--empty">—</td>`;
+      const isPct = r.opts.percent !== false && !r.opts.suffix;
+      const fmt = isPct
+        ? faFmtNum(v, { percent: true, decimals: 2 })
+        : faFmtNum(v, r.opts);
+      const cls = v < 0 ? 'fa-td fa-td--num fa-neg' : 'fa-td fa-td--num';
+      return `<td class="${cls}">${fmt}</td>`;
+    }).join('');
+    return `
+      <tr class="fa-row">
+        <td class="fa-td fa-td--label">${escHtml(r.label)}</td>
+        ${cells}
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <div class="fa-table-wrap">
+      <table class="fa-table">
+        <thead>
+          <tr>
+            <th class="fa-th fa-th--label">Ratio</th>
+            ${headerCells}
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 
