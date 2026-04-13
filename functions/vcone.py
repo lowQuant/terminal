@@ -16,12 +16,17 @@ Tompkins (2002) variance-inflation correction::
 Where h is the window length and n = T − h + 1 is the number of
 distinct subseries in the total sample.
 
-Earnings-day exclusion
+Earnings-day exclusion (opt-in)
 ──────────────────────
-A common bias in realized-vol estimation is that the single-day gap
-on earnings release day can dominate the tails of the distribution.
-When ``exclude_earnings=true`` we drop the log-return day that
-captured the earnings move, based on the release timing:
+The canonical volatility cone uses the full close-to-close return
+series — that's the default here and matches the article at
+https://lange-invest.com/trader/volatility-cones .
+
+For post-earnings short-vol strategies (sell options the day AFTER
+the release, when the gap has already happened), the one-day
+earnings gap is noise that biases the realized-vol distribution
+upward. Set ``exclude_earnings=true`` to drop the log-return day
+that captured the earnings move, detected from the release timing:
 
   - After-hours release (AMC, hour ≥ 12 ET):
         drop the NEXT trading day's return (the gap is in the
@@ -317,7 +322,7 @@ def _compute_cone(yf_ticker: str, years: int, exclude_earnings: bool) -> dict:
 @vcone_bp.route('/api/vcone/<symbol>')
 def api_vcone(symbol):
     exchange = (request.args.get('exchange') or '').strip()
-    exclude_earnings = (request.args.get('exclude_earnings') or 'true').strip().lower() == 'true'
+    exclude_earnings = (request.args.get('exclude_earnings') or 'false').strip().lower() == 'true'
 
     try:
         years = int(request.args.get('years') or 5)

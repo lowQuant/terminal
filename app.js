@@ -5926,7 +5926,10 @@ function ivolRenderChart() {
 // ═══════════════════════════════════════
 
 const vconeState = {
-  excludeEarnings: true,
+  // Default matches the canonical cone from the strategy article —
+  // earnings INCLUDED. Traders using the post-earnings short-vol play
+  // can flip it on to see what their filtered-history cone looks like.
+  excludeEarnings: false,
   years: 5,
   data: null,
   chart: null,
@@ -5957,10 +5960,10 @@ function renderVCone(container) {
 
         <div class="function-toolbar__label" style="margin-left:14px">Earnings</div>
         <div class="range-filter" id="vcone-earnings-filter">
-          <button class="country-btn ${vconeState.excludeEarnings ? 'country-btn--active' : ''}"
-                  data-excl="true" title="Strip first trading day after earnings releases">Exclude</button>
           <button class="country-btn ${!vconeState.excludeEarnings ? 'country-btn--active' : ''}"
-                  data-excl="false">Include</button>
+                  data-excl="false" title="Full historical realized vol (canonical cone)">Include</button>
+          <button class="country-btn ${vconeState.excludeEarnings ? 'country-btn--active' : ''}"
+                  data-excl="true" title="Strip the earnings-day gap (first trading day after release). Narrows the cone — useful for post-earnings short-vol strategies.">Exclude</button>
         </div>
 
         <div id="vcone-meta" style="margin-left:auto; font-size:11px; color:var(--text-tertiary); font-family:var(--font-mono)"></div>
@@ -6090,84 +6093,97 @@ function vconeRenderChart() {
   const labels = d.cone.map((c) => c.label);
   const pct = (v) => v == null ? null : +(v * 100).toFixed(2);
 
-  // Cone percentile lines (gray gradient)
+  // Five percentile lines rendered straight (no cubic smoothing) to
+  // match the matplotlib reference from the reference article. A
+  // single translucent IQR band (Q1 → Q3) gives the "cone" its body
+  // without overloading the chart with multiple stacked fills.
+  //
+  // Dataset order matters for Chart.js's `fill: '+N'` relative mode.
+  // Q3 is the fill *source*: it fills DOWN to Q1 (two datasets away).
   const datasets = [
+    // 0 — Max (dashed light gray)
     {
       label: 'Max',
       data: d.cone.map((c) => pct(c.max)),
-      borderColor: 'rgba(138, 140, 160, 0.55)',
+      borderColor: 'rgba(160, 162, 180, 0.9)',
       borderDash: [6, 4],
       borderWidth: 1.5,
-      backgroundColor: 'rgba(138, 140, 160, 0.08)',
-      fill: '+1',                     // fill toward next dataset (Q3)
+      backgroundColor: 'transparent',
+      fill: false,
       pointRadius: 0,
-      tension: 0.3,
+      tension: 0,
     },
+    // 1 — Q3 (solid gray) — also fills DOWN to Q1 (index 3)
     {
       label: '75%',
       data: d.cone.map((c) => pct(c.q3)),
-      borderColor: 'rgba(138, 140, 160, 0.75)',
+      borderColor: 'rgba(138, 140, 160, 0.95)',
       borderWidth: 1.5,
-      backgroundColor: 'rgba(138, 140, 160, 0.14)',
-      fill: '+1',                     // fill toward Median
+      backgroundColor: 'rgba(138, 140, 160, 0.12)',
+      fill: 3,
       pointRadius: 0,
-      tension: 0.3,
+      tension: 0,
     },
+    // 2 — Median (solid white, emphasized)
     {
       label: 'Median',
       data: d.cone.map((c) => pct(c.median)),
-      borderColor: 'rgba(232, 232, 240, 0.9)',
-      borderWidth: 2,
+      borderColor: 'rgba(232, 232, 240, 1)',
+      borderWidth: 2.5,
       backgroundColor: 'transparent',
       fill: false,
-      pointRadius: 3,
+      pointRadius: 3.5,
       pointBackgroundColor: 'rgba(232, 232, 240, 1)',
-      tension: 0.3,
+      pointBorderColor: '#0a0a0f',
+      pointBorderWidth: 1,
+      tension: 0,
     },
+    // 3 — Q1 (solid gray, mirror of Q3)
     {
       label: '25%',
       data: d.cone.map((c) => pct(c.q1)),
-      borderColor: 'rgba(138, 140, 160, 0.75)',
+      borderColor: 'rgba(138, 140, 160, 0.95)',
       borderWidth: 1.5,
-      backgroundColor: 'rgba(138, 140, 160, 0.14)',
-      fill: '+1',                     // fill toward Min
+      backgroundColor: 'transparent',
+      fill: false,
       pointRadius: 0,
-      tension: 0.3,
+      tension: 0,
     },
+    // 4 — Min (dashed light gray, mirror of Max)
     {
       label: 'Min',
       data: d.cone.map((c) => pct(c.min)),
-      borderColor: 'rgba(138, 140, 160, 0.55)',
+      borderColor: 'rgba(160, 162, 180, 0.9)',
       borderDash: [6, 4],
       borderWidth: 1.5,
-      backgroundColor: 'rgba(138, 140, 160, 0.08)',
+      backgroundColor: 'transparent',
       fill: false,
       pointRadius: 0,
-      tension: 0.3,
+      tension: 0,
     },
-    // Current realized — bright orange, emphasized
+    // 5 — Current realized (bright orange)
     {
       label: 'Current',
       data: d.cone.map((c) => pct(c.current)),
       borderColor: 'rgba(255, 140, 0, 1)',
       borderWidth: 2.5,
-      backgroundColor: 'rgba(255, 140, 0, 0.1)',
+      backgroundColor: 'transparent',
       fill: false,
       pointRadius: 5,
       pointHoverRadius: 7,
       pointBackgroundColor: 'rgba(255, 140, 0, 1)',
       pointBorderColor: '#0a0a0f',
       pointBorderWidth: 2,
-      tension: 0.25,
+      tension: 0,
     },
-    // Current IV — bright blue
+    // 6 — Current IV, ATM (dashed bright blue)
     {
       label: 'IV (ATM)',
       data: d.cone.map((c) => pct(c.iv)),
       borderColor: 'rgba(68, 138, 255, 1)',
       borderWidth: 2,
-      borderDash: [2, 2],
-      backgroundColor: 'rgba(68, 138, 255, 0.1)',
+      borderDash: [2, 3],
+      backgroundColor: 'transparent',
       fill: false,
       pointRadius: 5,
       pointHoverRadius: 7,
@@ -6175,7 +6191,7 @@ function vconeRenderChart() {
       pointBorderColor: '#0a0a0f',
       pointBorderWidth: 2,
       pointStyle: 'rectRot',
-      tension: 0.25,
+      tension: 0,
     },
   ];
 
