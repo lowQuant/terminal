@@ -4086,6 +4086,270 @@ body {
 
 
 /* ═══════════════════════════════════════════════════════════
+   FA — FINANCIAL ANALYSIS
+   ═══════════════════════════════════════════════════════════ */
+
+.fa-panel {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 480px;
+}
+
+.fa-panel .panel__body {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Secondary tabs (Highlights / IS / BS / CF / Ratios) ── */
+.fa-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.fa-tab {
+  padding: 9px 18px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s var(--ease);
+}
+
+.fa-tab:hover {
+  color: var(--text-secondary);
+  background: var(--accent-glow);
+}
+
+.fa-tab--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── FA toolbar info chip ── */
+.fa-toolbar__info {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Statement/Ratios table ── */
+.fa-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-accent) var(--bg-primary);
+}
+
+.fa-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  min-width: 640px;
+}
+
+.fa-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.fa-th {
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.fa-th--label {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: var(--bg-secondary);
+  min-width: 240px;
+}
+
+.fa-th--num {
+  text-align: right;
+  min-width: 100px;
+}
+
+.fa-th--muted {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+.fa-subheader th {
+  padding: 4px 12px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.fa-row {
+  border-bottom: 1px solid rgba(30, 32, 48, 0.5);
+  transition: background 0.1s var(--ease);
+}
+
+.fa-row:hover {
+  background: var(--bg-panel-hover);
+}
+
+.fa-td {
+  padding: 8px 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fa-td--label {
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  position: sticky;
+  left: 0;
+  background: var(--bg-panel);
+  z-index: 1;
+  border-right: 1px solid var(--border-primary);
+}
+
+.fa-row:hover .fa-td--label {
+  background: var(--bg-panel-hover);
+}
+
+.fa-td--num {
+  text-align: right;
+  color: var(--text-primary);
+}
+
+.fa-neg {
+  color: var(--red);
+}
+
+.fa-cell--empty {
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+/* ── Highlights — grid of cards ── */
+.fa-highlights {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  padding: 14px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.fa-hl-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.2s var(--ease);
+}
+
+.fa-hl-card:hover {
+  border-color: var(--border-accent);
+}
+
+.fa-hl-card__title {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--accent);
+  text-transform: uppercase;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.fa-hl-card__items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fa-hl-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 11px;
+}
+
+.fa-hl-item__label {
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+}
+
+.fa-hl-item__value {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.fa-hl-item__value--muted {
+  color: var(--text-tertiary);
+}
+
+/* ── Responsive ── */
+@media (max-width: 700px) {
+  .fa-tab {
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+  .fa-table {
+    font-size: 11px;
+    min-width: 500px;
+  }
+  .fa-th--label,
+  .fa-td--label {
+    min-width: 160px;
+  }
+  .fa-th, .fa-td {
+    padding: 6px 8px;
+  }
+  .fa-highlights {
+    grid-template-columns: 1fr;
+    padding: 10px;
+    gap: 10px;
+  }
+  .fa-hl-card {
+    padding: 12px 14px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
    OMON — OPTIONS MONITOR (Chain Table)
    ═══════════════════════════════════════════════════════════ */
 
