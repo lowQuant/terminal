@@ -4255,6 +4255,86 @@ body {
   font-style: normal;
 }
 
+/* Section header row (e.g. "— CURRENT ASSETS —") */
+.fa-row--header {
+  background: var(--bg-tertiary);
+}
+.fa-row--header:hover { background: var(--bg-tertiary); }
+
+.fa-td--section {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent);
+  text-transform: uppercase;
+  padding: 8px 12px !important;
+  background: var(--bg-tertiary) !important;
+  border-right: none !important;
+  border-top: 1px solid var(--border-primary);
+  position: sticky;
+  left: 0;
+}
+
+/* Computed rows (growth, margins) — subtler style */
+.fa-row--computed .fa-td {
+  background: rgba(255, 140, 0, 0.02);
+  font-style: italic;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.fa-row--computed:hover .fa-td {
+  background: var(--bg-panel-hover);
+}
+
+.fa-td--derived {
+  padding-left: 20px !important;
+  color: var(--text-secondary) !important;
+  font-weight: 400 !important;
+  font-style: italic;
+}
+
+/* Bolded total rows (e.g. "TOTAL ASSETS", "Net Income") */
+.fa-td--bold {
+  font-weight: 700 !important;
+  color: var(--text-primary) !important;
+  border-top: 1px solid var(--border-accent);
+}
+
+/* Highlights page — time-series KPI table + snapshot cards below */
+.fa-highlights-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 14px;
+}
+
+.fa-highlights-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fa-highlights-section__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent);
+  text-transform: uppercase;
+  padding: 0 2px;
+}
+
+.fa-table-wrap--kpi {
+  max-height: none;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius);
+  overflow: auto;
+}
+
 /* ── Highlights — grid of cards ── */
 .fa-highlights {
   display: grid;
