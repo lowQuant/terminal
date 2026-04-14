@@ -4909,10 +4909,28 @@ function _tapeBuildItemHTML(item, q) {
   `;
 }
 
-function renderTickerTape() {
+// Toggle the marquee based on whether the track (one copy) is wider
+// than the viewport. Called after render and on window resize so the
+// state stays correct without a page refresh.
+function _tapeUpdateScrollState() {
   const track = document.getElementById('tape-track');
   const viewport = document.getElementById('tape-viewport');
   if (!track || !viewport) return;
+  // scrollWidth is the full duplicated track; halve it to compare one
+  // copy against the viewport.
+  const halfWidth = track.scrollWidth / 2;
+  if (halfWidth > 0 && halfWidth < viewport.clientWidth) {
+    track.style.animationPlayState = 'paused';
+    track.style.transform = 'translateX(0)';
+  } else {
+    track.style.animationPlayState = '';
+    track.style.transform = '';
+  }
+}
+
+function renderTickerTape() {
+  const track = document.getElementById('tape-track');
+  if (!track) return;
   if (!state.tapeConfig) state.tapeConfig = _tapeLoadConfig();
 
   const items = _tapeActiveItems();
@@ -4923,47 +4941,33 @@ function renderTickerTape() {
     return;
   }
 
+  // Duplicate items so the -50% marquee translate produces a seamless loop.
   const htmlOnce = items.map(it => _tapeBuildItemHTML(it, _tapeQuotes[it.ticker])).join('');
+  track.innerHTML = htmlOnce + htmlOnce;
 
-  // Render one copy first to measure its natural width, then repeat it
-  // enough times that the duplicated track comfortably exceeds the
-  // viewport (so the -50% marquee translate produces a visible scroll).
-  track.innerHTML = htmlOnce;
-
-  requestAnimationFrame(() => {
-    const vpWidth = viewport.clientWidth || window.innerWidth || 1200;
-    const singleWidth = track.scrollWidth || 1;
-
-    // We want one "copy block" to be at least as wide as the viewport,
-    // then duplicate it once more for the seamless loop. Keeping the
-    // copy count even means -50% lands on a seam with no content jump.
-    let copiesPerBlock = Math.max(1, Math.ceil(vpWidth / singleWidth));
-    let totalCopies = copiesPerBlock * 2;
-    if (totalCopies % 2 !== 0) totalCopies += 1;
-
-    track.innerHTML = htmlOnce.repeat(totalCopies);
-
-    // Pixel-accurate keyframes: animate to exactly -(half of total track).
-    // Use transform on a per-element style so the CSS keyframe is
-    // effectively overridden via a JS-controlled animation.
-    const halfWidth = track.scrollWidth / 2;
-    const pxPerSec = 55;
-    const duration = Math.max(20, halfWidth / pxPerSec);
-    track.style.animationDuration = `${duration}s`;
-    track.style.animationPlayState = items.length > 1 ? '' : 'paused';
-    track.style.transform = '';
-
-    // Re-wire click handlers for every rendered chip (including copies).
-    track.querySelectorAll('.tape-item[data-ticker]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const tkr = btn.getAttribute('data-ticker');
-        const exch = btn.getAttribute('data-exchange') || 'NASDAQ';
-        const name = btn.getAttribute('data-name') || '';
-        const tvSupported = isTvSupported(exch);
-        loadSymbol(`${exch}:${tkr}`, tvSupported, name);
-      });
+  // Wire clicks (all copies share the same data attrs)
+  track.querySelectorAll('.tape-item[data-ticker]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tkr = btn.getAttribute('data-ticker');
+      const exch = btn.getAttribute('data-exchange') || 'NASDAQ';
+      const name = btn.getAttribute('data-name') || '';
+      const tvSupported = isTvSupported(exch);
+      loadSymbol(`${exch}:${tkr}`, tvSupported, name);
     });
   });
+
+  // Evaluate scroll state after layout settles.
+  requestAnimationFrame(_tapeUpdateScrollState);
+
+  // Keep the scroll state in sync with viewport size. Re-bind idempotently.
+  if (!window._tapeResizeBound) {
+    let t = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(t);
+      t = setTimeout(_tapeUpdateScrollState, 80);
+    });
+    window._tapeResizeBound = true;
+  }
 
   _tapeStartRefresh();
 }
