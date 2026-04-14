@@ -100,6 +100,7 @@ function initTerminal() {
   initArticleModal();
   initSymbolBarInput();
   initBurgerMenu();
+  initTapeSettings();
   renderTickerTape();
   // Start on the Home page — no ticker loaded until the user searches one.
   setActiveTab('home');
@@ -971,44 +972,180 @@ function updateSymbolBar(companyName) {
 }
 
 // ── Symbol bar editable ticker input ──
+// Behaves like the header search (company names, autosuggest) but
+// scoped to securities — functions are NOT routed from here since
+// this input's job is to swap the current security while keeping
+// the active function open.
+let _sbSearchAbort = null;
+let _sbResults = [];
+let _sbActiveIdx = -1;
+let _sbSuppressBlurRevert = false;
+
 function initSymbolBarInput() {
   const input = $('#symbol-ticker-input');
-  if (!input) return;
+  const dropdown = $('#symbol-ticker-dropdown');
+  if (!input || !dropdown) return;
+
+  const positionDropdown = () => {
+    if (!dropdown.classList.contains('symbol-bar__dropdown--visible')) return;
+    const r = input.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const width = dropdown.offsetWidth || 380;
+    let left = r.left;
+    if (left + width > vw - 8) left = Math.max(8, vw - width - 8);
+    dropdown.style.left = `${left}px`;
+    dropdown.style.top  = `${r.bottom + 4}px`;
+  };
+
+  const hideDropdown = () => {
+    dropdown.classList.remove('symbol-bar__dropdown--visible');
+    _sbActiveIdx = -1;
+    window.removeEventListener('resize', positionDropdown);
+    window.removeEventListener('scroll', positionDropdown, true);
+  };
+
+  const applyResult = (r) => {
+    _sbSuppressBlurRevert = true;
+    const currentFunction = state.activeFunction;
+    // loadSymbol handles TV/yf routing and resets state.activeFunction to null.
+    loadSymbol(r.tvSymbol, r.tvSupported, r.name, r.yfExchange);
+    input.blur();
+    hideDropdown();
+    if (currentFunction) {
+      setTimeout(() => openFunction(currentFunction), 300);
+    }
+    setTimeout(() => { _sbSuppressBlurRevert = false; }, 50);
+  };
+
+  const renderResults = (results) => {
+    if (!results || results.length === 0) {
+      hideDropdown();
+      return;
+    }
+    _sbResults = results;
+    _sbActiveIdx = -1;
+    dropdown.innerHTML = results.map((r, i) => {
+      const tvBadge = r.tvSupported
+        ? `<span class="sb-result__tv sb-result__tv--supported">TV</span>`
+        : `<span class="sb-result__tv sb-result__tv--fallback">YF</span>`;
+      return `
+        <div class="sb-result" data-idx="${i}">
+          <span class="sb-result__ticker">${escHtml(r.ticker)}</span>
+          <div class="sb-result__info">
+            <span class="sb-result__name">${escHtml(r.name || '')}</span>
+            <span class="sb-result__exchange">${escHtml(r.exchange || '')}</span>
+          </div>
+          <div class="sb-result__badges">
+            <span class="sb-result__type">${escHtml(r.type || 'EQUITY')}</span>
+            ${tvBadge}
+          </div>
+        </div>
+      `;
+    }).join('');
+    dropdown.classList.add('symbol-bar__dropdown--visible');
+    positionDropdown();
+    window.addEventListener('resize', positionDropdown);
+    window.addEventListener('scroll', positionDropdown, true);
+    dropdown.querySelectorAll('.sb-result').forEach(el => {
+      // mousedown (before blur) so the click registers before input blur clears
+      el.addEventListener('mousedown', (e) => e.preventDefault());
+      el.addEventListener('click', () => {
+        const i = parseInt(el.getAttribute('data-idx'), 10);
+        if (_sbResults[i]) applyResult(_sbResults[i]);
+      });
+    });
+  };
+
+  const debouncedSearch = debounce(async (query) => {
+    if (!query) { hideDropdown(); return; }
+    if (_sbSearchAbort) _sbSearchAbort.abort();
+    _sbSearchAbort = new AbortController();
+    try {
+      const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}`, {
+        signal: _sbSearchAbort.signal,
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const results = await resp.json();
+      // Filter: tickers only — no functions leak into the symbol bar.
+      // /api/search only returns securities, so no extra filter needed here,
+      // but we defensively drop anything without a tvSymbol.
+      renderResults(results.filter(r => r && r.tvSymbol));
+    } catch (err) {
+      if (err.name !== 'AbortError') { /* ignore */ }
+    }
+  }, 250);
 
   // Select all text on focus for easy replacement
-  input.addEventListener('focus', () => {
-    input.select();
+  input.addEventListener('focus', () => { input.select(); });
+
+  input.addEventListener('input', () => {
+    const val = input.value.trim();
+    if (val.length > 0) debouncedSearch(val);
+    else hideDropdown();
   });
 
-  // Enter = confirm ticker change
   input.addEventListener('keydown', (e) => {
+    const isVisible = dropdown.classList.contains('symbol-bar__dropdown--visible');
+
+    if (isVisible && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      const items = dropdown.querySelectorAll('.sb-result');
+      if (items.length === 0) return;
+      _sbActiveIdx = e.key === 'ArrowDown'
+        ? Math.min(_sbActiveIdx + 1, items.length - 1)
+        : Math.max(_sbActiveIdx - 1, 0);
+      items.forEach((it, i) => it.classList.toggle('sb-result--active', i === _sbActiveIdx));
+      items[_sbActiveIdx]?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+
     if (e.key === 'Enter') {
       e.preventDefault();
+      // If a result is highlighted, use it
+      if (isVisible && _sbActiveIdx >= 0 && _sbResults[_sbActiveIdx]) {
+        applyResult(_sbResults[_sbActiveIdx]);
+        return;
+      }
+      // Otherwise fall back: first result, then raw value
       const val = input.value.trim().toUpperCase();
-      if (val && val !== state.currentTicker) {
-        // Try to load as a ticker
-        const currentFunction = state.activeFunction;
+      if (!val) { input.blur(); return; }
+      if (isVisible && _sbResults.length > 0) {
+        applyResult(_sbResults[0]);
+        return;
+      }
+      // No results yet — treat input as a raw ticker and route via loadSymbol
+      _sbSuppressBlurRevert = true;
+      const currentFunction = state.activeFunction;
+      if (val.includes(':')) {
+        const [exch] = val.split(':');
+        loadSymbol(val, isTvSupported(exch));
+      } else if (val !== state.currentTicker) {
         loadSymbol(`NASDAQ:${val}`, true);
-        // Re-open the same function after ticker change
-        if (currentFunction) {
-          setTimeout(() => openFunction(currentFunction), 300);
-        }
       }
+      if (currentFunction) setTimeout(() => openFunction(currentFunction), 300);
       input.blur();
+      hideDropdown();
+      setTimeout(() => { _sbSuppressBlurRevert = false; }, 50);
+      return;
     }
+
     if (e.key === 'Escape') {
-      // Revert to current ticker and blur
       input.value = state.currentTicker;
+      hideDropdown();
       input.blur();
-      if (state.activeTab !== 'home') {
-        setActiveTab('home');
-      }
+      if (state.activeTab !== 'home') setActiveTab('home');
     }
   });
 
-  // Revert on blur if not confirmed
+  // Revert on blur if the user abandoned the edit. Delay so clicks
+  // on dropdown items have a chance to register first.
   input.addEventListener('blur', () => {
-    input.value = state.currentTicker;
+    setTimeout(() => {
+      hideDropdown();
+      if (!_sbSuppressBlurRevert) {
+        input.value = state.currentTicker;
+      }
+    }, 180);
   });
 }
 
@@ -4689,47 +4826,367 @@ function injectFinancials(containerId, symbol) {
 // TICKER TAPE
 // ═══════════════════════════════════════
 
+// ── Custom ticker tape ─────────────────────────────────────
+// Clickable, customizable tape that loads symbols into the
+// terminal on click (no TradingView redirect). Supports two
+// modes — 'custom' (user-curated list) and 'watchlist' (mirrors
+// the active worksheet). Config persists in localStorage.
+
+const TAPE_STORAGE_KEY = 'terminal_tape_v1';
+const TAPE_REFRESH_MS = 30_000;
+
+const TAPE_DEFAULT_ITEMS = [
+  { ticker: 'AAPL',  exchange: 'NASDAQ', name: 'Apple' },
+  { ticker: 'MSFT',  exchange: 'NASDAQ', name: 'Microsoft' },
+  { ticker: 'NVDA',  exchange: 'NASDAQ', name: 'NVIDIA' },
+  { ticker: 'GOOGL', exchange: 'NASDAQ', name: 'Alphabet' },
+  { ticker: 'AMZN',  exchange: 'NASDAQ', name: 'Amazon' },
+  { ticker: 'META',  exchange: 'NASDAQ', name: 'Meta' },
+  { ticker: 'TSLA',  exchange: 'NASDAQ', name: 'Tesla' },
+  { ticker: 'JPM',   exchange: 'NYSE',   name: 'JPMorgan' },
+  { ticker: 'SPY',   exchange: 'AMEX',   name: 'S&P 500 ETF' },
+  { ticker: 'QQQ',   exchange: 'NASDAQ', name: 'Nasdaq 100 ETF' },
+];
+
+let _tapeRefreshTimer = null;
+let _tapeQuotes = {};            // keyed by ticker
+let _tapeSuggestAbort = null;
+let _tapeSuggestActiveIdx = -1;
+
+function _tapeLoadConfig() {
+  try {
+    const raw = localStorage.getItem(TAPE_STORAGE_KEY);
+    if (raw) {
+      const cfg = JSON.parse(raw);
+      if (cfg && Array.isArray(cfg.items)) {
+        return {
+          mode: cfg.mode === 'watchlist' ? 'watchlist' : 'custom',
+          items: cfg.items.filter(i => i && i.ticker),
+        };
+      }
+    }
+  } catch (_) { /* ignore */ }
+  return { mode: 'custom', items: TAPE_DEFAULT_ITEMS.slice() };
+}
+
+function _tapeSaveConfig(cfg) {
+  try { localStorage.setItem(TAPE_STORAGE_KEY, JSON.stringify(cfg)); } catch (_) {}
+}
+
+function _tapeActiveItems() {
+  const cfg = state.tapeConfig || _tapeLoadConfig();
+  if (cfg.mode === 'watchlist') {
+    const wl = state.watchlist || [];
+    return wl.map(w => ({
+      ticker: w.symbol,
+      exchange: w.exchange || 'NASDAQ',
+      name: w.name || w.symbol,
+    }));
+  }
+  return cfg.items;
+}
+
+function _tapeBuildItemHTML(item, q) {
+  const last = (q && q.last != null) ? q.last.toFixed(2) : '—';
+  let chgHtml = '';
+  if (q && q.change != null && q.changePct != null) {
+    const pos = q.change >= 0;
+    const sign = pos ? '+' : '';
+    chgHtml = `<span class="tape-item__chg ${pos ? 'tape-item__chg--pos' : 'tape-item__chg--neg'}">`
+            + `${sign}${q.change.toFixed(2)} (${sign}${q.changePct.toFixed(2)}%)</span>`;
+  } else {
+    chgHtml = `<span class="tape-item__chg tape-item__chg--flat">—</span>`;
+  }
+  const exch = escHtml(item.exchange || 'NASDAQ');
+  const tkr  = escHtml(item.ticker);
+  const name = escHtml(item.name || item.ticker);
+  return `
+    <button type="button" class="tape-item" data-ticker="${tkr}" data-exchange="${exch}" data-name="${name}" title="Load ${tkr}">
+      <span class="tape-item__ticker">${tkr}</span>
+      <span class="tape-item__last">${last}</span>
+      ${chgHtml}
+    </button>
+  `;
+}
+
+// Toggle the marquee based on whether the track (one copy) is wider
+// than the viewport. Called after render and on window resize so the
+// state stays correct without a page refresh.
+function _tapeUpdateScrollState() {
+  const track = document.getElementById('tape-track');
+  const viewport = document.getElementById('tape-viewport');
+  if (!track || !viewport) return;
+  // scrollWidth is the full duplicated track; halve it to compare one
+  // copy against the viewport.
+  const halfWidth = track.scrollWidth / 2;
+  if (halfWidth > 0 && halfWidth < viewport.clientWidth) {
+    track.style.animationPlayState = 'paused';
+    track.style.transform = 'translateX(0)';
+  } else {
+    track.style.animationPlayState = '';
+    track.style.transform = '';
+  }
+}
+
 function renderTickerTape() {
-  const container = document.getElementById('ticker-tape');
-  if (!container) return;
-  container.innerHTML = '';
+  const track = document.getElementById('tape-track');
+  if (!track) return;
+  if (!state.tapeConfig) state.tapeConfig = _tapeLoadConfig();
 
-  const widgetDiv = document.createElement('div');
-  widgetDiv.className = 'tradingview-widget-container';
-  widgetDiv.style.width = '100%';
-  widgetDiv.style.height = '66px';
+  const items = _tapeActiveItems();
+  if (items.length === 0) {
+    track.innerHTML = `<span class="tape-item tape-item--empty">Your watchlist is empty — open Settings to switch modes.</span>`;
+    track.style.animationPlayState = 'paused';
+    track.style.transform = 'translateX(0)';
+    return;
+  }
 
-  const innerDiv = document.createElement('div');
-  innerDiv.className = 'tradingview-widget-container__widget';
-  widgetDiv.appendChild(innerDiv);
+  // Duplicate items so the -50% marquee translate produces a seamless loop.
+  const htmlOnce = items.map(it => _tapeBuildItemHTML(it, _tapeQuotes[it.ticker])).join('');
+  track.innerHTML = htmlOnce + htmlOnce;
 
-  const script = document.createElement('script');
-  script.type = 'text/javascript';
-  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js';
-  script.async = true;
-  script.textContent = JSON.stringify({
-    symbols: [
-      { proName: 'FOREXCOM:SPXUSD', title: 'S&P 500' },
-      { proName: 'FOREXCOM:NSXUSD', title: 'US 100' },
-      { proName: 'FX_IDC:EURUSD', title: 'EUR/USD' },
-      { proName: 'BITSTAMP:BTCUSD', title: 'Bitcoin' },
-      { proName: 'BITSTAMP:ETHUSD', title: 'Ethereum' },
-      { proName: 'NASDAQ:AAPL', title: 'Apple' },
-      { proName: 'NASDAQ:MSFT', title: 'Microsoft' },
-      { proName: 'NASDAQ:NVDA', title: 'NVIDIA' },
-      { proName: 'NASDAQ:GOOGL', title: 'Alphabet' },
-      { proName: 'NASDAQ:AMZN', title: 'Amazon' },
-      { proName: 'NASDAQ:TSLA', title: 'Tesla' },
-      { proName: 'NASDAQ:META', title: 'Meta' },
-    ],
-    showSymbolLogo: true,
-    isTransparent: true,
-    displayMode: 'adaptive',
-    colorTheme: 'dark',
-    locale: 'en',
+  // Wire clicks (all copies share the same data attrs)
+  track.querySelectorAll('.tape-item[data-ticker]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tkr = btn.getAttribute('data-ticker');
+      const exch = btn.getAttribute('data-exchange') || 'NASDAQ';
+      const name = btn.getAttribute('data-name') || '';
+      const tvSupported = isTvSupported(exch);
+      loadSymbol(`${exch}:${tkr}`, tvSupported, name);
+    });
   });
-  widgetDiv.appendChild(script);
-  container.appendChild(widgetDiv);
+
+  // Evaluate scroll state after layout settles.
+  requestAnimationFrame(_tapeUpdateScrollState);
+
+  // Keep the scroll state in sync with viewport size. Re-bind idempotently.
+  if (!window._tapeResizeBound) {
+    let t = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(t);
+      t = setTimeout(_tapeUpdateScrollState, 80);
+    });
+    window._tapeResizeBound = true;
+  }
+
+  _tapeStartRefresh();
+}
+
+async function _tapeFetchQuotes() {
+  const items = _tapeActiveItems();
+  if (items.length === 0) return;
+  const tickers = items.map(i => i.ticker).join(',');
+  // Pass exchanges so the backend can apply yfinance suffixes
+  // (e.g. TSE:6146 → 6146.T, EURONEXT_AMS:ASML → ASML.AS).
+  const exchanges = items.map(i => i.exchange || '').join(',');
+  try {
+    const resp = await fetch(
+      `/api/watchlist/quotes?tickers=${encodeURIComponent(tickers)}`
+      + `&exchanges=${encodeURIComponent(exchanges)}`
+    );
+    const data = await resp.json();
+    if (data && Array.isArray(data.quotes)) {
+      data.quotes.forEach(q => { _tapeQuotes[q.symbol] = q; });
+      _tapeUpdateCells();
+    }
+  } catch (e) {
+    // Non-fatal — keep last rendered state
+  }
+}
+
+function _tapeUpdateCells() {
+  const track = document.getElementById('tape-track');
+  if (!track) return;
+  track.querySelectorAll('.tape-item[data-ticker]').forEach(btn => {
+    const t = btn.getAttribute('data-ticker');
+    const q = _tapeQuotes[t];
+    if (!q) return;
+    const lastEl = btn.querySelector('.tape-item__last');
+    const chgEl  = btn.querySelector('.tape-item__chg');
+    if (lastEl) lastEl.textContent = (q.last != null) ? q.last.toFixed(2) : '—';
+    if (chgEl) {
+      if (q.change != null && q.changePct != null) {
+        const pos = q.change >= 0;
+        const sign = pos ? '+' : '';
+        chgEl.className = 'tape-item__chg ' + (pos ? 'tape-item__chg--pos' : 'tape-item__chg--neg');
+        chgEl.textContent = `${sign}${q.change.toFixed(2)} (${sign}${q.changePct.toFixed(2)}%)`;
+      } else {
+        chgEl.className = 'tape-item__chg tape-item__chg--flat';
+        chgEl.textContent = '—';
+      }
+    }
+  });
+}
+
+function _tapeStartRefresh() {
+  if (_tapeRefreshTimer) clearInterval(_tapeRefreshTimer);
+  _tapeFetchQuotes();
+  _tapeRefreshTimer = setInterval(_tapeFetchQuotes, TAPE_REFRESH_MS);
+}
+
+// ── Tape settings panel ────────────────────────────────────
+function initTapeSettings() {
+  const btn   = document.getElementById('tape-settings-btn');
+  const panel = document.getElementById('tape-settings-panel');
+  const closeBtn = document.getElementById('tape-settings-close');
+  if (!btn || !panel) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const visible = panel.style.display !== 'none';
+    if (visible) {
+      panel.style.display = 'none';
+    } else {
+      panel.style.display = '';
+      _tapeRenderPanel();
+    }
+  });
+  if (closeBtn) closeBtn.addEventListener('click', () => { panel.style.display = 'none'; });
+
+  document.addEventListener('click', (e) => {
+    if (panel.style.display === 'none') return;
+    if (panel.contains(e.target) || e.target === btn) return;
+    panel.style.display = 'none';
+  });
+
+  // Radio handlers
+  panel.querySelectorAll('input[name="tape-mode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      state.tapeConfig.mode = r.value;
+      _tapeSaveConfig(state.tapeConfig);
+      _tapeRenderPanel();
+      renderTickerTape();
+    });
+  });
+
+  // Custom add input — reuses /api/search for resolution
+  const addInput = document.getElementById('tape-add-input');
+  const suggestEl = document.getElementById('tape-add-suggest');
+  if (addInput) {
+    const debouncedFetch = debounce(async (q) => {
+      if (!q || q.length < 1) {
+        if (suggestEl) { suggestEl.innerHTML = ''; suggestEl.classList.remove('tape-settings-panel__suggest--visible'); }
+        return;
+      }
+      try {
+        if (_tapeSuggestAbort) _tapeSuggestAbort.abort();
+        _tapeSuggestAbort = new AbortController();
+        const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: _tapeSuggestAbort.signal });
+        const results = await resp.json();
+        _tapeRenderSuggest(results);
+      } catch (e) {
+        if (e.name !== 'AbortError') { /* ignore */ }
+      }
+    }, 250);
+
+    addInput.addEventListener('input', () => debouncedFetch(addInput.value.trim()));
+    addInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { addInput.value = ''; _tapeRenderSuggest([]); }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        // Pick first suggestion or add raw
+        const first = suggestEl && suggestEl.querySelector('.tape-suggest__item');
+        if (first) first.click();
+      }
+    });
+    addInput.addEventListener('blur', () => {
+      setTimeout(() => { if (suggestEl) suggestEl.classList.remove('tape-settings-panel__suggest--visible'); }, 180);
+    });
+  }
+}
+
+function _tapeRenderPanel() {
+  const panel = document.getElementById('tape-settings-panel');
+  if (!panel) return;
+  const cfg = state.tapeConfig || _tapeLoadConfig();
+  // Sync radios
+  panel.querySelectorAll('input[name="tape-mode"]').forEach(r => { r.checked = (r.value === cfg.mode); });
+  // Toggle custom section
+  const customSection = document.getElementById('tape-custom-section');
+  if (customSection) customSection.style.display = (cfg.mode === 'custom') ? '' : 'none';
+  // Render custom list
+  const listEl = document.getElementById('tape-custom-list');
+  if (listEl) {
+    if (cfg.items.length === 0) {
+      listEl.innerHTML = `<div class="tape-list__empty">No symbols yet — add one below.</div>`;
+    } else {
+      listEl.innerHTML = cfg.items.map((it, i) => `
+        <div class="tape-list__row">
+          <span class="tape-list__sym">${escHtml(it.ticker)}</span>
+          <span class="tape-list__exch">${escHtml(it.exchange || 'NASDAQ')}</span>
+          <span class="tape-list__name">${escHtml(it.name || '')}</span>
+          <button class="tape-list__remove" data-idx="${i}" title="Remove">✕</button>
+        </div>
+      `).join('');
+      listEl.querySelectorAll('.tape-list__remove').forEach(b => {
+        b.addEventListener('click', (e) => {
+          // Stop bubbling so the document-level "click outside → close"
+          // handler doesn't see a target that we're about to detach via
+          // _tapeRenderPanel() and mistake it for an outside click.
+          e.stopPropagation();
+          const idx = parseInt(b.getAttribute('data-idx'), 10);
+          if (!Number.isNaN(idx)) {
+            cfg.items.splice(idx, 1);
+            _tapeSaveConfig(cfg);
+            _tapeRenderPanel();
+            renderTickerTape();
+          }
+        });
+      });
+    }
+  }
+}
+
+function _tapeRenderSuggest(results) {
+  const el = document.getElementById('tape-add-suggest');
+  if (!el) return;
+  const items = (Array.isArray(results) ? results : []).slice(0, 8);
+  if (items.length === 0) {
+    el.innerHTML = '';
+    el.classList.remove('tape-settings-panel__suggest--visible');
+    return;
+  }
+  el.innerHTML = items.map(r => {
+    // `r.exchange` is the human label ("Tokyo Stock Exchange"), but the
+    // tape needs the internal key (e.g. "TSE") so the backend can apply
+    // the yfinance suffix (6146 → 6146.T) via to_yfinance_ticker().
+    const key = r.yfExchange || r.tvPrefix || 'NASDAQ';
+    return `
+    <div class="tape-suggest__item"
+         data-ticker="${escHtml(r.ticker)}"
+         data-exchange="${escHtml(key)}"
+         data-name="${escHtml(r.name || '')}">
+      <span class="tape-suggest__sym">${escHtml(r.ticker)}</span>
+      <span class="tape-suggest__name">${escHtml(r.name || '')}</span>
+      <span class="tape-suggest__exch">${escHtml(r.exchange || '')}</span>
+    </div>
+  `;}).join('');
+  el.classList.add('tape-settings-panel__suggest--visible');
+  el.querySelectorAll('.tape-suggest__item').forEach(it => {
+    it.addEventListener('mousedown', (e) => e.preventDefault()); // keep input focus
+    it.addEventListener('click', (e) => {
+      // Same reason as the remove-row handler: prevent the document
+      // outside-close listener from seeing a target we're about to
+      // detach via el.innerHTML = ''.
+      e.stopPropagation();
+      const cfg = state.tapeConfig || _tapeLoadConfig();
+      const entry = {
+        ticker: it.getAttribute('data-ticker'),
+        exchange: it.getAttribute('data-exchange') || 'NASDAQ',
+        name: it.getAttribute('data-name') || '',
+      };
+      if (!cfg.items.find(i => i.ticker === entry.ticker && i.exchange === entry.exchange)) {
+        cfg.items.push(entry);
+        _tapeSaveConfig(cfg);
+      }
+      const addInput = document.getElementById('tape-add-input');
+      if (addInput) addInput.value = '';
+      el.innerHTML = '';
+      el.classList.remove('tape-settings-panel__suggest--visible');
+      _tapeRenderPanel();
+      renderTickerTape();
+    });
+  });
 }
 
 
@@ -4755,6 +5212,10 @@ function wlRenderHeatBars(heat) {
 function saveWorksheets() {
   localStorage.setItem('terminal_worksheets', JSON.stringify(state.worksheets));
   localStorage.setItem('terminal_active_ws', String(state.activeWorksheetId));
+  // Keep the ticker tape fresh when it's mirroring the watchlist.
+  if (state.tapeConfig && state.tapeConfig.mode === 'watchlist') {
+    try { renderTickerTape(); } catch (_) {}
+  }
 }
 
 function addToWatchlist(symbol, exchange, name) {
@@ -5116,10 +5577,14 @@ function wlCancelAdd() {
 // ── Fetch enriched quote data for all tickers in active worksheet ──
 async function wlFetchQuotes() {
   const tickers = state.watchlist.map(t => t.symbol);
+  const exchanges = state.watchlist.map(t => t.exchange || '');
   if (tickers.length === 0) return;
 
   try {
-    const resp = await fetch(`/api/watchlist/quotes?tickers=${encodeURIComponent(tickers.join(','))}`);
+    const resp = await fetch(
+      `/api/watchlist/quotes?tickers=${encodeURIComponent(tickers.join(','))}`
+      + `&exchanges=${encodeURIComponent(exchanges.join(','))}`
+    );
     const data = await resp.json();
     if (data.quotes) {
       data.quotes.forEach(q => {

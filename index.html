@@ -239,12 +239,47 @@
     </header>
 
     <!-- ══════════ TICKER TAPE ══════════ -->
-    <div class="ticker-tape-bar" id="ticker-tape"></div>
+    <div class="ticker-tape-bar" id="ticker-tape">
+      <div class="tape-viewport" id="tape-viewport">
+        <div class="tape-track" id="tape-track"></div>
+      </div>
+      <button class="tape-settings-btn" id="tape-settings-btn" title="Customize ticker tape">⚙</button>
+      <div class="tape-settings-panel" id="tape-settings-panel" style="display:none">
+        <div class="tape-settings-panel__header">
+          <span class="tape-settings-panel__title">Ticker Tape</span>
+          <button class="tape-settings-panel__close" id="tape-settings-close" title="Close">✕</button>
+        </div>
+        <div class="tape-settings-panel__body">
+          <div class="tape-settings-panel__modes">
+            <label class="tape-mode-opt">
+              <input type="radio" name="tape-mode" value="custom" id="tape-mode-custom">
+              <span>Custom list</span>
+            </label>
+            <label class="tape-mode-opt">
+              <input type="radio" name="tape-mode" value="watchlist" id="tape-mode-watchlist">
+              <span>My watchlist</span>
+            </label>
+          </div>
+          <div class="tape-settings-panel__list-section" id="tape-custom-section">
+            <div class="tape-settings-panel__subhead">Symbols</div>
+            <div class="tape-settings-panel__list" id="tape-custom-list"></div>
+            <div class="tape-settings-panel__add">
+              <input type="text" class="tape-settings-panel__input" id="tape-add-input"
+                     placeholder="Add ticker or company..." spellcheck="false" autocomplete="off">
+              <div class="tape-settings-panel__suggest" id="tape-add-suggest"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- ══════════ ACTIVE SYMBOL BAR ══════════ -->
     <div class="symbol-bar" id="symbol-bar" style="display:none">
-      <input type="text" class="symbol-bar__ticker-input" id="symbol-ticker-input" value="AAPL" spellcheck="false"
-        autocomplete="off" title="Click or press Esc to change ticker">
+      <div class="symbol-bar__input-wrap">
+        <input type="text" class="symbol-bar__ticker-input" id="symbol-ticker-input" value="AAPL" spellcheck="false"
+          autocomplete="off" title="Click or press Esc to change ticker. Type a company name or ticker.">
+        <div class="symbol-bar__dropdown" id="symbol-ticker-dropdown"></div>
+      </div>
       <span class="symbol-bar__name" id="symbol-name">Apple Inc.</span>
       <span class="symbol-bar__divider" id="symbol-divider"></span>
       <span class="text-muted" style="font-size: 11px;" id="symbol-exchange">NASDAQ</span>
@@ -465,6 +500,7 @@
   <script src="auth.js"></script>
   <script src="app.js"></script>
   <script src="wf.js"></script>
+  <script src="tour.js"></script>
 
 </body>
 

@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import math
 import traceback
 
+from exchange_map import to_yfinance_ticker
+
 watchlist_bp = Blueprint('watchlist', __name__)
 
 
@@ -37,9 +39,19 @@ def batch_quotes():
     Uses fast_info only for speed.
 
     Query params:
-      tickers  — comma-separated list of tickers (e.g. AAPL,MSFT,TSLA)
+      tickers    — comma-separated raw tickers (e.g. AAPL,6146,ASML)
+      exchanges  — optional comma-separated parallel list of internal
+                   exchange keys (e.g. NASDAQ,TSE,EURONEXT_AMS). When
+                   provided, each ticker is suffixed via
+                   to_yfinance_ticker() so international symbols resolve
+                   correctly (6146 → 6146.T, ASML → ASML.AS, etc.).
+                   Missing / empty entries fall back to the raw ticker.
+
+    The response echoes the ORIGINAL raw ticker in each quote's "symbol"
+    field so the frontend can match rows by the same key it sent.
     """
     tickers_raw = request.args.get('tickers', '')
+    exchanges_raw = request.args.get('exchanges', '')
     if not tickers_raw:
         return jsonify({'error': 'No tickers provided', 'quotes': []})
 
@@ -47,11 +59,18 @@ def batch_quotes():
     if not tickers:
         return jsonify({'error': 'No valid tickers', 'quotes': []})
 
+    # Parallel list; pad to tickers length so zip() is safe even when
+    # the caller omits exchanges or sends a shorter list.
+    exchanges = [e.strip().upper() for e in exchanges_raw.split(',')] if exchanges_raw else []
+    while len(exchanges) < len(tickers):
+        exchanges.append('')
+
     results = []
 
-    for symbol in tickers:
+    for symbol, exchange in zip(tickers, exchanges):
         try:
-            tkr = yf.Ticker(symbol)
+            yf_symbol = to_yfinance_ticker(exchange, symbol) if exchange else symbol
+            tkr = yf.Ticker(yf_symbol)
             info = tkr.fast_info
 
             last = _safe_float(getattr(info, 'last_price', None))
