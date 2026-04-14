@@ -181,6 +181,7 @@
   <!-- ══════════ USER NAV (shown when logged in) ══════════ -->
   <div id="user-nav" class="user-nav" style="display:none">
     <span class="user-nav__name" id="user-display-name"></span>
+    <button class="user-nav__help" id="help-btn" title="Help (F1)">?</button>
     <button class="user-nav__settings" id="settings-btn" title="Settings">⚙</button>
     <button class="user-nav__logout" id="logout-btn" title="Sign out">Sign Out</button>
   </div>
@@ -232,6 +233,7 @@
           <span id="mobile-clock">--:--:--</span>
         </div>
         <div class="mobile-menu__actions">
+          <button class="mobile-menu__btn" id="mobile-help-btn" title="Help">? Help</button>
           <button class="mobile-menu__btn" id="mobile-settings-btn" title="Settings">⚙ Settings</button>
           <button class="mobile-menu__btn mobile-menu__btn--danger" id="mobile-logout-btn" title="Sign out">Sign Out</button>
         </div>
@@ -500,6 +502,7 @@
   <script src="auth.js"></script>
   <script src="app.js"></script>
   <script src="wf.js"></script>
+  <script src="help.js"></script>
   <script src="tour.js"></script>
 
 </body>

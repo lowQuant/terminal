@@ -113,6 +113,20 @@
       `,
     },
     {
+      target: '#help-btn',
+      placement: 'bottom-left',
+      title: 'Help is always here',
+      body: `
+        <p>Click the <span class="kbd">?</span> up top — or press
+        <span class="kbd">F1</span> from anywhere — to open the
+        <b>Help page</b>.</p>
+        <p>It's a searchable reference for every function (market and
+        stock-specific), with aliases, how-to-invoke hints, and
+        related-function jump links. You can <b>replay this tour</b>
+        from there any time.</p>
+      `,
+    },
+    {
       target: '#settings-btn',
       placement: 'bottom-left',
       title: 'Agent Settings',
@@ -138,7 +152,7 @@
         <ul class="tour-tip__list">
           <li>Press <span class="kbd">/</span> to search anything.</li>
           <li>Press <span class="kbd">Esc</span> to step back.</li>
-          <li>Press <span class="kbd">F1</span> any time to replay this tour.</li>
+          <li>Press <span class="kbd">F1</span> for Help — function docs plus a button to replay this tour.</li>
         </ul>
         <p>Happy trading.</p>
       `,
@@ -412,20 +426,15 @@
     try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
   }
 
-  // ── F1 replay shortcut ────────────────────────────────────
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'F1') return;
-    // Don't hijack F1 inside text inputs where it might be a dev shortcut
-    const t = e.target;
-    const tag = t && t.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
-    e.preventDefault();
+  // Silently dismiss a running tour without marking it complete.
+  // Used by help.js when the user opens Help during a live tour.
+  function endTourSilently() {
     if (tourState) endTour(false);
-    else startTour();
-  });
+  }
 
   // Expose
   window.startTour = startTour;
   window.maybeStartTour = maybeStartTour;
   window.resetTour = resetTour;
+  window.endTourSilently = endTourSilently;
 })();
