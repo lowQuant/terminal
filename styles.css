@@ -399,7 +399,8 @@ body {
   border-bottom: 1px solid var(--border-primary);
   background: var(--bg-secondary);
   height: 36px;
-  overflow: hidden;
+  /* NOTE: no overflow:hidden here — the viewport child clips the tape
+     items, and the settings panel needs to escape this bar. */
   position: relative;
   display: flex;
   align-items: stretch;
