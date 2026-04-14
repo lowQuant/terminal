@@ -6712,11 +6712,13 @@ body {
   font-family: var(--font-sans);
 }
 
+/* Backdrop sits over the whole app. Intentionally light so the UI
+   stays legible in the background — the spotlight ring is what draws
+   the eye, not a blackout overlay. */
 .tour-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(6, 7, 12, 0.72);
-  backdrop-filter: blur(2px);
+  background: rgba(6, 7, 12, 0.32);
   pointer-events: auto;
   animation: tour-fade-in 180ms var(--ease);
 }
@@ -6726,7 +6728,7 @@ body {
   border-radius: 8px;
   pointer-events: none;
   box-shadow:
-    0 0 0 9999px rgba(6, 7, 12, 0.72),
+    0 0 0 9999px rgba(6, 7, 12, 0.38),
     0 0 0 2px var(--accent),
     0 0 22px 2px var(--accent-glow-strong);
   transition:
@@ -6740,15 +6742,15 @@ body {
 @keyframes tour-pulse {
   0%, 100% {
     box-shadow:
-      0 0 0 9999px rgba(6, 7, 12, 0.72),
+      0 0 0 9999px rgba(6, 7, 12, 0.38),
       0 0 0 2px var(--accent),
       0 0 22px 2px var(--accent-glow-strong);
   }
   50% {
     box-shadow:
-      0 0 0 9999px rgba(6, 7, 12, 0.72),
+      0 0 0 9999px rgba(6, 7, 12, 0.38),
       0 0 0 2px var(--accent),
-      0 0 30px 6px rgba(255, 140, 0, 0.35);
+      0 0 30px 6px rgba(255, 140, 0, 0.4);
   }
 }
 
