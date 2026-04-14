@@ -4976,8 +4976,14 @@ async function _tapeFetchQuotes() {
   const items = _tapeActiveItems();
   if (items.length === 0) return;
   const tickers = items.map(i => i.ticker).join(',');
+  // Pass exchanges so the backend can apply yfinance suffixes
+  // (e.g. TSE:6146 → 6146.T, EURONEXT_AMS:ASML → ASML.AS).
+  const exchanges = items.map(i => i.exchange || '').join(',');
   try {
-    const resp = await fetch(`/api/watchlist/quotes?tickers=${encodeURIComponent(tickers)}`);
+    const resp = await fetch(
+      `/api/watchlist/quotes?tickers=${encodeURIComponent(tickers)}`
+      + `&exchanges=${encodeURIComponent(exchanges)}`
+    );
     const data = await resp.json();
     if (data && Array.isArray(data.quotes)) {
       data.quotes.forEach(q => { _tapeQuotes[q.symbol] = q; });
@@ -5113,7 +5119,11 @@ function _tapeRenderPanel() {
         </div>
       `).join('');
       listEl.querySelectorAll('.tape-list__remove').forEach(b => {
-        b.addEventListener('click', () => {
+        b.addEventListener('click', (e) => {
+          // Stop bubbling so the document-level "click outside → close"
+          // handler doesn't see a target that we're about to detach via
+          // _tapeRenderPanel() and mistake it for an outside click.
+          e.stopPropagation();
           const idx = parseInt(b.getAttribute('data-idx'), 10);
           if (!Number.isNaN(idx)) {
             cfg.items.splice(idx, 1);
@@ -5136,20 +5146,29 @@ function _tapeRenderSuggest(results) {
     el.classList.remove('tape-settings-panel__suggest--visible');
     return;
   }
-  el.innerHTML = items.map(r => `
+  el.innerHTML = items.map(r => {
+    // `r.exchange` is the human label ("Tokyo Stock Exchange"), but the
+    // tape needs the internal key (e.g. "TSE") so the backend can apply
+    // the yfinance suffix (6146 → 6146.T) via to_yfinance_ticker().
+    const key = r.yfExchange || r.tvPrefix || 'NASDAQ';
+    return `
     <div class="tape-suggest__item"
          data-ticker="${escHtml(r.ticker)}"
-         data-exchange="${escHtml(r.exchange || 'NASDAQ')}"
+         data-exchange="${escHtml(key)}"
          data-name="${escHtml(r.name || '')}">
       <span class="tape-suggest__sym">${escHtml(r.ticker)}</span>
       <span class="tape-suggest__name">${escHtml(r.name || '')}</span>
       <span class="tape-suggest__exch">${escHtml(r.exchange || '')}</span>
     </div>
-  `).join('');
+  `;}).join('');
   el.classList.add('tape-settings-panel__suggest--visible');
   el.querySelectorAll('.tape-suggest__item').forEach(it => {
     it.addEventListener('mousedown', (e) => e.preventDefault()); // keep input focus
-    it.addEventListener('click', () => {
+    it.addEventListener('click', (e) => {
+      // Same reason as the remove-row handler: prevent the document
+      // outside-close listener from seeing a target we're about to
+      // detach via el.innerHTML = ''.
+      e.stopPropagation();
       const cfg = state.tapeConfig || _tapeLoadConfig();
       const entry = {
         ticker: it.getAttribute('data-ticker'),
@@ -5558,10 +5577,14 @@ function wlCancelAdd() {
 // ── Fetch enriched quote data for all tickers in active worksheet ──
 async function wlFetchQuotes() {
   const tickers = state.watchlist.map(t => t.symbol);
+  const exchanges = state.watchlist.map(t => t.exchange || '');
   if (tickers.length === 0) return;
 
   try {
-    const resp = await fetch(`/api/watchlist/quotes?tickers=${encodeURIComponent(tickers.join(','))}`);
+    const resp = await fetch(
+      `/api/watchlist/quotes?tickers=${encodeURIComponent(tickers.join(','))}`
+      + `&exchanges=${encodeURIComponent(exchanges.join(','))}`
+    );
     const data = await resp.json();
     if (data.quotes) {
       data.quotes.forEach(q => {
