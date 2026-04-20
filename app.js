@@ -734,6 +734,12 @@ function initSearch() {
   // Debounced API search
   const debouncedSearch = debounce(async (query) => {
     if (query.length < 1) return;
+    // The debounce timer can fire AFTER clearSearch() has already
+    // emptied the input (e.g. user typed "EVTS" then pressed Enter —
+    // Enter routes to openFunction+clearSearch, but the 300ms timer
+    // scheduled by the last keystroke is still pending). If the
+    // input no longer holds this query, don't re-open the dropdown.
+    if (!input.value.trim() || _searchClearing) return;
 
     // Cancel previous search
     if (_searchAbort) _searchAbort.abort();
@@ -748,6 +754,10 @@ function initSearch() {
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const results = await resp.json();
+      // Second check: the input may have been cleared while the fetch
+      // was in flight. Don't render stale results on top of a now-empty
+      // search.
+      if (!input.value.trim() || _searchClearing) return;
       state.searchResults = results;
       state.searchActiveIndex = -1;
       renderSearchResults(results, query);
@@ -755,7 +765,7 @@ function initSearch() {
       if (err.name !== 'AbortError') {
         console.error('Search failed:', err);
         // Fall back to watchlist filtering
-        renderWatchlistFilter(query);
+        if (input.value.trim() && !_searchClearing) renderWatchlistFilter(query);
       }
     }
   }, 300);
@@ -967,6 +977,9 @@ function renderSearchResults(results, query) {
 
 function clearSearch() {
   _searchClearing = true;
+  // Abort any in-flight /api/search fetch so its resolved callback
+  // can't re-render the dropdown after we've just emptied it.
+  if (_searchAbort) { _searchAbort.abort(); _searchAbort = null; }
   const input = $('#ticker-input');
   if (input) { input.value = ''; input.blur(); }
   const dropdown = $('#recent-dropdown');
@@ -976,7 +989,11 @@ function clearSearch() {
   }
   state.searchResults = [];
   state.searchActiveIndex = -1;
-  setTimeout(() => { _searchClearing = false; }, 50);
+  // Keep the guard flag set long enough to cover a pending 300ms
+  // debounce timer scheduled by the user's last keystroke before
+  // Enter fired — otherwise that timer would fire after we cleared
+  // and re-populate the dropdown.
+  setTimeout(() => { _searchClearing = false; }, 400);
 }
 
 function renderWatchlistFilter(query) {
@@ -5073,10 +5090,16 @@ function _tapeUpdateScrollState() {
   const track = document.getElementById('tape-track');
   const viewport = document.getElementById('tape-viewport');
   if (!track || !viewport) return;
-  // scrollWidth is the full duplicated track; halve it to compare one
-  // copy against the viewport.
+  // halfWidth = width of a single (non-duplicated) item set.
+  // Only pause the marquee when the content is so sparse that
+  // scrolling looks pointless — i.e. all unique items fill less
+  // than 40% of the viewport.  For 10 default items (~1300px) on
+  // a 1920px display this evaluates 1300 < 768 → false → scrolls.
+  // For 3 items (~400px) on the same display → 400 < 768 → true →
+  // pauses.
   const halfWidth = track.scrollWidth / 2;
-  if (halfWidth > 0 && halfWidth < viewport.clientWidth) {
+  const threshold = viewport.clientWidth * 0.4;
+  if (halfWidth > 0 && halfWidth < threshold) {
     track.style.animationPlayState = 'paused';
     track.style.transform = 'translateX(0)';
   } else {
