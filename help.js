@@ -145,6 +145,7 @@
     { keys: ['⌘', 'K'],          desc: 'Focus search (alternate)' },
     { keys: ['1'], extra: '…6',  desc: 'Switch stock tabs (Overview, Chart, News, Financials, Profile, Watchlist)' },
     { keys: ['Esc'],             desc: 'Focus ticker input · leave a function · return home (priority-based)' },
+    { keys: ['Backspace'],       desc: 'Go back to the previous view (or click ← in the header)' },
     { keys: ['F1'],              desc: 'Open this Help page' },
     { keys: ['Enter'],           desc: 'Load highlighted result · confirm ticker swap' },
     { keys: ['↑', '↓'],          desc: 'Navigate autocomplete suggestions' },
