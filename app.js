@@ -5073,10 +5073,16 @@ function _tapeUpdateScrollState() {
   const track = document.getElementById('tape-track');
   const viewport = document.getElementById('tape-viewport');
   if (!track || !viewport) return;
-  // scrollWidth is the full duplicated track; halve it to compare one
-  // copy against the viewport.
+  // halfWidth = width of a single (non-duplicated) item set.
+  // Only pause the marquee when the content is so sparse that
+  // scrolling looks pointless — i.e. all unique items fill less
+  // than 40% of the viewport.  For 10 default items (~1300px) on
+  // a 1920px display this evaluates 1300 < 768 → false → scrolls.
+  // For 3 items (~400px) on the same display → 400 < 768 → true →
+  // pauses.
   const halfWidth = track.scrollWidth / 2;
-  if (halfWidth > 0 && halfWidth < viewport.clientWidth) {
+  const threshold = viewport.clientWidth * 0.4;
+  if (halfWidth > 0 && halfWidth < threshold) {
     track.style.animationPlayState = 'paused';
     track.style.transform = 'translateX(0)';
   } else {
