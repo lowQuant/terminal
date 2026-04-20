@@ -551,6 +551,16 @@ const FUNCTIONS = [
     related: ['WF', 'DES', 'EQS'],
   },
   {
+    code: 'PORT',
+    name: 'Portfolio (IBKR)',
+    desc: 'Your Interactive Brokers positions, cash & NAV (read-only, EOD)',
+    aliases: ['PORT', 'PORTFOLIO', 'HOLDINGS', 'IBKR'],
+    implemented: true,
+    category: 'nav',
+    longDesc: 'Portfolio view for Interactive Brokers accounts — positions with cost basis and unrealized P&L, cash balances per currency, NAV history. Data via the IBKR Flex Web Service: read-only by design, cannot trade or move funds. Requires a Flex token + Query ID from IBKR Account Management (see Settings → Brokerage). Data is end-of-day.',
+    related: ['W', 'WF'],
+  },
+  {
     code: 'WF',
     name: 'Workflows',
     desc: 'Agentic research workflows — chain functions with Claude analysis',
@@ -698,6 +708,7 @@ function openFunction(code) {
     case 'VCONE': renderVCone(dashboard); break;
     case 'WF':   renderWorkflowHub(dashboard); break;
     case 'IMAP': renderIMAP(dashboard); break;
+    case 'PORT': renderPortfolio(dashboard); break;
   }
   updateStatusBar();
 }
@@ -1852,6 +1863,242 @@ function injectImapWidget(tabId) {
     width: '100%',
     height: '100%',
   });
+}
+
+
+// ═══════════════════════════════════════
+// PORT — Portfolio (IBKR Flex Web Service)
+// ═══════════════════════════════════════
+//
+// Calls /api/ibkr/flex/snapshot on mount with the user's Flex token +
+// Query ID (loaded from window.User.broker_config.ibkr.flex, which
+// mirrors the RLS-scoped profiles.broker_config JSONB). The token is
+// POSTed in the JSON body — never in a URL — so it doesn't land in
+// access logs or browser history.
+//
+// If the user hasn't configured IBKR, we show a friendly prompt
+// linking to the setup guide + a button that opens Settings.
+
+function _fmtMoney(v, currency = 'USD') {
+  if (v == null || !isFinite(v)) return '—';
+  try {
+    return v.toLocaleString('en-US', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 0,
+    });
+  } catch {
+    return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  }
+}
+
+function _fmtQty(v) {
+  if (v == null || !isFinite(v)) return '—';
+  return v.toLocaleString('en-US', { maximumFractionDigits: 4 });
+}
+
+function _fmtPnlCell(v) {
+  if (v == null || !isFinite(v)) return '<td class="col-num">—</td>';
+  const cls = v >= 0 ? 'wf-cell--up' : 'wf-cell--down';
+  return `<td class="col-num ${cls}">${_fmtMoney(v)}</td>`;
+}
+
+function renderPortfolio(container) {
+  container.className = 'dashboard dashboard--function';
+
+  const flex = ((window.User?.broker_config?.ibkr) || {}).flex || {};
+  const configured = !!(flex.token && flex.query_id);
+
+  container.innerHTML = `
+    <div class="function-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">PORT</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">Portfolio</div>
+            <div class="function-header__name-sub">Interactive Brokers · Flex Web Service · read-only · EOD</div>
+          </div>
+        </div>
+      </header>
+      <div class="panel function-panel">
+        <div class="panel__body" id="port-body" style="padding: 20px;">
+          ${configured
+            ? '<div style="color: var(--text-secondary);">Loading your IBKR snapshot…</div>'
+            : _renderPortSetupPrompt()}
+        </div>
+      </div>
+    </div>
+  `;
+
+  setDataSource('IBKR Flex');
+
+  if (!configured) return;
+
+  _fetchAndRenderPort();
+}
+
+function _renderPortSetupPrompt() {
+  return `
+    <div style="max-width: 620px;">
+      <h3 style="margin: 0 0 12px; font-size: 1rem;">Connect your Interactive Brokers account</h3>
+      <p style="color: var(--text-secondary); line-height: 1.6; margin: 0 0 14px;">
+        Link IBKR via the <strong>Flex Web Service</strong> — a read-only XML API that
+        IBKR provides for portfolio reporting. The token cannot place trades, move funds,
+        or change account settings, and it's revocable in one click from Account Management.
+        Data is end-of-day.
+      </p>
+      <ol style="color: var(--text-secondary); line-height: 1.8; margin: 0 0 18px; padding-left: 20px;">
+        <li>In IBKR Account Management, generate a <em>Flex Web Service token</em> and
+            create a <em>Flex Query</em> that includes Open Positions, Cash Report, and
+            NAV in base.</li>
+        <li>Paste the token and Query ID into <strong>Settings → Brokerage</strong>.</li>
+        <li>Come back here to see your portfolio.</li>
+      </ol>
+      <p style="margin: 0 0 16px;">
+        <a href="docs/IBKR_SETUP.md" target="_blank" rel="noopener" style="color: var(--accent, #4fc3f7);">
+          Full setup guide →
+        </a>
+      </p>
+      <button class="auth-btn auth-btn--primary" onclick="document.getElementById('settings-btn')?.click()"
+              style="padding: 10px 18px;">Open Settings</button>
+    </div>
+  `;
+}
+
+async function _fetchAndRenderPort() {
+  const body = document.getElementById('port-body');
+  if (!body) return;
+
+  const flex = window.User.broker_config.ibkr.flex;
+  let data;
+  try {
+    const res = await fetch('/api/ibkr/flex/snapshot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: flex.token, query_id: flex.query_id }),
+    });
+    data = await res.json();
+    if (!res.ok || data.error) {
+      body.innerHTML = `
+        <div style="color: var(--red, #ef5350); padding: 8px 0;">
+          ${escHtml(data.error || `HTTP ${res.status}`)}
+        </div>
+        <p style="color: var(--text-secondary); margin: 10px 0 0; font-size: 0.85rem;">
+          Verify your token and Query ID in <a href="#" onclick="document.getElementById('settings-btn')?.click(); return false;" style="color: var(--accent, #4fc3f7);">Settings</a>.
+          Check the <a href="docs/IBKR_SETUP.md" target="_blank" rel="noopener" style="color: var(--accent, #4fc3f7);">setup guide</a> if IBKR returned an error.
+        </p>
+      `;
+      return;
+    }
+  } catch (err) {
+    body.innerHTML = `<div style="color: var(--red, #ef5350);">Network error: ${escHtml(String(err))}</div>`;
+    return;
+  }
+
+  _renderPortSnapshot(body, data);
+}
+
+function _renderPortSnapshot(body, data) {
+  const account = data.account || {};
+  const positions = data.positions || [];
+  const cash = data.cash || [];
+  const nav = data.nav || [];
+
+  const totalValue = positions.reduce((s, p) => s + (p.value || 0), 0);
+  const totalUnreal = positions.reduce((s, p) => s + (p.unrealizedPnl || 0), 0);
+  const baseCash = (cash.find((c) => c.currency === 'BASE_SUMMARY') || {}).endingCash;
+  const latestNav = nav.length ? nav[nav.length - 1] : null;
+
+  const headerBar = `
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 20px;">
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Account</div>
+        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;">${escHtml(account.id || 'IBKR')}</div>
+        <div style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 2px;">${escHtml(data.asOf || '')}</div>
+      </div>
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">NAV (base)</div>
+        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;">${_fmtMoney(latestNav?.total)}</div>
+      </div>
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Positions value</div>
+        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;">${_fmtMoney(totalValue)}</div>
+      </div>
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Unrealized P&amp;L</div>
+        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;"
+             class="${totalUnreal >= 0 ? 'wf-cell--up' : 'wf-cell--down'}">
+          ${_fmtMoney(totalUnreal)}
+        </div>
+      </div>
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Cash (base)</div>
+        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;">${_fmtMoney(baseCash)}</div>
+      </div>
+    </div>
+  `;
+
+  const positionsTable = positions.length ? `
+    <h3 style="margin: 0 0 10px; font-size: 0.95rem;">Positions <span style="color: var(--text-secondary); font-weight: normal;">(${positions.length})</span></h3>
+    <div style="overflow-x: auto;">
+      <table class="wf-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+        <thead>
+          <tr style="border-bottom: 1px solid var(--border, #2a2a2a); color: var(--text-secondary); text-align: left;">
+            <th style="padding: 8px 10px;">Symbol</th>
+            <th style="padding: 8px 10px;">Description</th>
+            <th style="padding: 8px 10px;">Class</th>
+            <th style="padding: 8px 10px;">Ccy</th>
+            <th class="col-num" style="padding: 8px 10px; text-align: right;">Qty</th>
+            <th class="col-num" style="padding: 8px 10px; text-align: right;">Mark</th>
+            <th class="col-num" style="padding: 8px 10px; text-align: right;">Value</th>
+            <th class="col-num" style="padding: 8px 10px; text-align: right;">Cost basis</th>
+            <th class="col-num" style="padding: 8px 10px; text-align: right;">Unrealized</th>
+            <th class="col-num" style="padding: 8px 10px; text-align: right;">% NAV</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${positions.map((p) => `
+            <tr style="border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.06));">
+              <td style="padding: 8px 10px; font-weight: 600;">${escHtml(p.symbol || '—')}</td>
+              <td style="padding: 8px 10px; color: var(--text-secondary);">${escHtml(p.description || '')}</td>
+              <td style="padding: 8px 10px;">${escHtml(p.assetCategory || '')}</td>
+              <td style="padding: 8px 10px;">${escHtml(p.currency || '')}</td>
+              <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtQty(p.qty)}</td>
+              <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtQty(p.mark)}</td>
+              <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(p.value, p.currency || 'USD')}</td>
+              <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(p.costBasis, p.currency || 'USD')}</td>
+              ${_fmtPnlCell(p.unrealizedPnl)}
+              <td class="col-num" style="padding: 8px 10px; text-align: right;">${p.pctOfNav != null ? p.pctOfNav.toFixed(1) + '%' : '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  ` : '<p style="color: var(--text-secondary);">No open positions in this statement.</p>';
+
+  const cashTable = cash.length ? `
+    <h3 style="margin: 24px 0 10px; font-size: 0.95rem;">Cash balances</h3>
+    <table class="wf-table" style="width: 100%; max-width: 480px; border-collapse: collapse; font-size: 0.85rem;">
+      <thead>
+        <tr style="border-bottom: 1px solid var(--border, #2a2a2a); color: var(--text-secondary); text-align: left;">
+          <th style="padding: 8px 10px;">Currency</th>
+          <th class="col-num" style="padding: 8px 10px; text-align: right;">Ending cash</th>
+          <th class="col-num" style="padding: 8px 10px; text-align: right;">Settled</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${cash.map((c) => `
+          <tr style="border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.06));">
+            <td style="padding: 8px 10px; font-weight: 600;">${escHtml(c.currency || '—')}</td>
+            <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(c.endingCash, c.currency === 'BASE_SUMMARY' ? 'USD' : c.currency)}</td>
+            <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(c.endingSettledCash, c.currency === 'BASE_SUMMARY' ? 'USD' : c.currency)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  ` : '';
+
+  body.innerHTML = headerBar + positionsTable + cashTable;
 }
 
 
