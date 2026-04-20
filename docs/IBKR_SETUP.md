@@ -22,62 +22,114 @@ that uses the `PORT` tool — never stored server-side, never logged.
 
 ## One-time setup
 
-### 1. Enable Flex Web Service on your IBKR account
+### Step 1 — Generate a Flex Web Service token
 
-In **IBKR Account Management** → **Settings** → **Account Settings**
-→ **Reporting** → **Flex Web Service**:
+In IBKR **Client Portal** → **Performance & Reports** → **Flex Queries**
+(or **Account Management** → **Reports** → **Flex Queries** on the
+classic portal):
 
-1. Click **Configure** next to *Flex Web Service*
-2. Enable the service
-3. Click **Generate token** — copy this token somewhere safe for the
-   next step. It looks like a long hex string.
+1. Scroll to the **Flex Web Service** panel at the bottom of the page.
+2. If it's disabled, click **Configure** → **Enable** the service.
+3. Click **Generate token** (or **New token**). Copy the long hex
+   string — this is your **Flex Token**. Treat it like a password.
 
-### 2. Create a Flex Query
+Tokens don't expire on their own, but if you regenerate one the old
+one stops working instantly. Revoke = regenerate.
 
-Still in Account Management: **Reporting** → **Flex Queries** →
-**Create (Activity Flex Query)**:
+### Step 2 — Create an Activity Flex Query
 
-1. Give it a name, e.g. `terminal-portfolio`
-2. Set **Period** to `Last Business Day` (or `Month to Date` if you
-   want NAV history)
-3. Set **Format** to `XML` and version to `3`
-4. Under **Sections**, tick these (untick all others — smaller query
-   = faster response):
+On the same Flex Queries page, click **Create (Activity Flex Query)**.
 
-   | Section | Why |
-   |---|---|
-   | **Open Positions** | Positions with symbol, quantity, mark, cost basis, unrealized P&L |
-   | **Cash Report** | Cash balances per currency (plus base summary) |
-   | **Net Asset Value in Base Currency** | NAV snapshot / time series |
-   | **Account Information** | Account ID (used for the header) |
+**Query-level settings**
 
-5. For each section, click its gear icon and enable **all** columns
-   (or at minimum: symbol, description, assetCategory, currency,
-   listingExchange, position, markPrice, positionValue,
-   costBasisPrice, costBasisMoney, fifoPnlUnrealized, percentOfNAV
-   for Open Positions; currency, endingCash, endingSettledCash for
-   Cash Report; reportDate, total for NAV).
-6. Save — note the **Query ID** (a number) shown in the Flex Queries
-   list.
+| Setting | Value |
+|---|---|
+| Query name | `terminal-portfolio` (any name works) |
+| Period | `Last Business Day` — fastest. Use `Month-to-Date` if you want a NAV curve. |
+| Format | **XML** |
+| Version | **3** |
+| Delivery | Default (on-demand via Web Service) |
 
-### 3. Paste credentials into the terminal
+**Sections and fields**
 
-1. Open the terminal, click your avatar → **Settings**
-2. Scroll to the **Brokerage** section
-3. Paste your **Flex Token** and **Query ID**
-4. Click **Save**
+Add each of the four sections below and tick the listed fields.
+The terminal is tolerant — enabling more fields than listed won't
+break anything (unknown attributes are ignored), but ticking the
+fields below is the minimum for a full PORT view.
 
-### 4. View your portfolio
+#### Account Information
 
-Type `PORT` into the search bar (or `PORTFOLIO`, `HOLDINGS`, `IBKR`)
-and hit Enter. You should see your account ID, NAV, positions value,
-unrealized P&L, cash balance, and a table of positions sorted by market
-value.
+Powers the account ID shown in the PORT header.
 
-You can also reference your portfolio inside any workflow by adding a
-step that calls the `PORT` tool. The tool reads the credentials from
-your run context automatically — you don't need to pass them as
-parameters.
+| Field | Used for |
+|---|---|
+| `accountId` | Account identifier in the header |
+
+#### Open Positions
+
+Powers the positions table.
+
+| Field | Used for |
+|---|---|
+| `symbol` | Ticker |
+| `description` | Company name |
+| `assetCategory` | STK / OPT / BOND / FUND |
+| `currency` | Position currency |
+| `listingExchange` | Exchange |
+| `position` | Quantity |
+| `markPrice` | Current mark |
+| `positionValue` | Market value (used for sorting) |
+| `costBasisPrice` | Cost per share |
+| `costBasisMoney` | Total cost basis |
+| `fifoPnlUnrealized` | Unrealized P&L (green/red) |
+| `percentOfNAV` | Position weight in the portfolio |
+
+Set the **Options** flag for this section to: Level of Detail →
+`Summary` (one row per instrument). Lot-level rows aren't used.
+
+#### Cash Report
+
+Powers the cash-balances table.
+
+| Field | Used for |
+|---|---|
+| `currency` | USD, EUR, …, plus synthetic `BASE_SUMMARY` |
+| `endingCash` | Balance at report date |
+| `endingSettledCash` | Settled portion |
+
+#### Net Asset Value in Base Currency (NAV Summary)
+
+Powers the NAV tile and the base currency used throughout the view.
+
+| Field | Used for |
+|---|---|
+| `reportDate` | Time-series x-axis (if Period > 1 day) |
+| `currency` | Base currency (e.g. USD) |
+| `cash` / `stock` / `options` / `bond` / `fund` | NAV breakdown |
+| `total` | Total NAV |
+
+Save the query. The **Query ID** (a numeric value) appears in the
+Flex Queries list — you'll need it in Step 3.
+
+### Step 3 — Paste credentials into the terminal
+
+1. Open the terminal.
+2. Click your avatar → **Settings** → scroll to **Brokerage**.
+3. Paste the **Flex Token** from Step 1 and the **Query ID** from
+   Step 2.
+4. Click **Save**.
+
+### Step 4 — View your portfolio
+
+Type `PORT` in the search bar (or `PORTFOLIO`, `HOLDINGS`, `IBKR`)
+and hit Enter. You should see your account ID, NAV, positions
+value, unrealized P&L, cash balance, and a table of positions
+sorted by market value.
+
+You can also reference your portfolio inside any workflow by adding
+a step that calls the `PORT` tool. The tool reads the credentials
+from your run context automatically — you don't need to pass them
+as parameters.
 
 ## Data freshness
 
@@ -96,12 +148,14 @@ is the right tradeoff for a "how is my portfolio doing today" view.
 
 | Error | Fix |
 |---|---|
-| `Invalid Flex token` (code 1005) | Regenerate the token in Account Management — old tokens expire after rotation. |
-| `Flex token has expired` (code 1012) | Same fix — generate a new token and paste it in Settings. |
-| `Invalid Query ID` (code 1006) | Confirm the Query ID is the numeric ID from the Flex Queries list (not the query name). |
-| `Flex Web Service is not enabled` (code 1010) | Enable Flex Web Service in Account Management (Step 1 above). |
-| `Too many requests` (code 1018) | IBKR throttles; wait a minute. The terminal's 15-min cache should prevent this in normal use. |
-| `IBKR took too long to generate the statement` | Narrow the query — set Period to `Last Business Day`, untick unused sections. Large accounts with many instruments can exceed the 60s poll window. |
+| `Invalid Flex token` (1005) | Regenerate the token in Account Management — old tokens stop working when you rotate. |
+| `Flex token has expired` (1012) | Same fix — generate a new token and paste it in Settings. |
+| `Invalid Query ID` (1006) | Confirm the Query ID is the **numeric** ID from the Flex Queries list (not the query name). |
+| `Invalid Flex Query` (1007) | Open the query in IBKR, save it again — the format version may be stale. |
+| `Flex Web Service is not enabled` (1010) | Enable Flex Web Service in Step 1 above. |
+| `Too many requests` (1018) | IBKR throttles. Wait a minute. The terminal's 15-min cache prevents this in normal use. |
+| `IBKR took too long to generate the statement` | Narrow the query — set Period to `Last Business Day`, drop unused sections. Very large accounts can exceed the 60s poll window. |
+| No positions shown, but cash + NAV render | Your query's Open Positions section is disabled or has Level of Detail set to `Lot`. Re-enable it at the Summary level. |
 
 ## Revoking access
 

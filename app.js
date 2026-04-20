@@ -1903,6 +1903,15 @@ function _fmtPnlCell(v) {
   return `<td class="col-num ${cls}">${_fmtMoney(v)}</td>`;
 }
 
+// Exposed globally so auth.js can re-render PORT after the user saves
+// IBKR credentials in the Settings modal — avoids an awkward "navigate
+// away and back" step for the setup flow.
+window.refreshPortfolioView = function () {
+  if (state.activeFunction !== 'PORT') return;
+  const dashboard = document.getElementById('dashboard');
+  if (dashboard) renderPortfolio(dashboard);
+};
+
 function renderPortfolio(container) {
   container.className = 'dashboard dashboard--function';
 
@@ -1938,29 +1947,118 @@ function renderPortfolio(container) {
 }
 
 function _renderPortSetupPrompt() {
+  // Field lists rendered inline so users don't have to switch to a doc
+  // while they're in IBKR's Flex Query editor. Keep these aligned with
+  // the backend parser in functions/ibkr.py.
+  const sections = [
+    {
+      name: 'Account Information',
+      why: 'Account ID shown in the PORT header.',
+      fields: ['accountId'],
+    },
+    {
+      name: 'Open Positions',
+      why: 'Positions table — symbol, qty, value, cost basis, P&L.',
+      note: 'Set Level of Detail to <strong>Summary</strong> (one row per instrument).',
+      fields: [
+        'symbol', 'description', 'assetCategory', 'currency',
+        'listingExchange', 'position', 'markPrice', 'positionValue',
+        'costBasisPrice', 'costBasisMoney', 'fifoPnlUnrealized',
+        'percentOfNAV',
+      ],
+    },
+    {
+      name: 'Cash Report',
+      why: 'Cash balances per currency, plus a BASE_SUMMARY total.',
+      fields: ['currency', 'endingCash', 'endingSettledCash'],
+    },
+    {
+      name: 'Net Asset Value in Base Currency',
+      why: 'NAV tile and base currency.',
+      fields: ['reportDate', 'currency', 'cash', 'stock', 'options', 'bond', 'fund', 'total'],
+    },
+  ];
+
+  const renderFieldList = (fs) => fs.map((f) =>
+    `<code style="background: rgba(255,255,255,0.05); padding: 1px 6px; border-radius: 3px; font-size: 0.78rem;">${f}</code>`
+  ).join(' ');
+
+  const renderSection = (s) => `
+    <details style="border: 1px solid var(--border, #2a2a2a); border-radius: 4px; margin-bottom: 8px; padding: 10px 14px;">
+      <summary style="cursor: pointer; font-weight: 600; font-size: 0.9rem;">
+        ${escHtml(s.name)}
+        <span style="color: var(--text-secondary); font-weight: normal; font-size: 0.8rem; margin-left: 8px;">${escHtml(s.why)}</span>
+      </summary>
+      <div style="margin-top: 10px; line-height: 1.7;">
+        ${s.note ? `<p style="color: var(--text-secondary); font-size: 0.82rem; margin: 0 0 8px;">${s.note}</p>` : ''}
+        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Tick these fields:</div>
+        <div>${renderFieldList(s.fields)}</div>
+      </div>
+    </details>
+  `;
+
   return `
-    <div style="max-width: 620px;">
-      <h3 style="margin: 0 0 12px; font-size: 1rem;">Connect your Interactive Brokers account</h3>
-      <p style="color: var(--text-secondary); line-height: 1.6; margin: 0 0 14px;">
-        Link IBKR via the <strong>Flex Web Service</strong> — a read-only XML API that
-        IBKR provides for portfolio reporting. The token cannot place trades, move funds,
-        or change account settings, and it's revocable in one click from Account Management.
-        Data is end-of-day.
+    <div style="max-width: 760px;">
+      <h3 style="margin: 0 0 10px; font-size: 1.05rem;">Connect your Interactive Brokers account</h3>
+      <p style="color: var(--text-secondary); line-height: 1.6; margin: 0 0 18px; font-size: 0.9rem;">
+        The terminal reads your portfolio via IBKR's <strong>Flex Web Service</strong> — a read-only
+        XML API. The token cannot place trades, move funds, or change settings; revoke it any
+        time in IBKR Account Management. Data is end-of-day.
       </p>
-      <ol style="color: var(--text-secondary); line-height: 1.8; margin: 0 0 18px; padding-left: 20px;">
-        <li>In IBKR Account Management, generate a <em>Flex Web Service token</em> and
-            create a <em>Flex Query</em> that includes Open Positions, Cash Report, and
-            NAV in base.</li>
-        <li>Paste the token and Query ID into <strong>Settings → Brokerage</strong>.</li>
-        <li>Come back here to see your portfolio.</li>
-      </ol>
-      <p style="margin: 0 0 16px;">
-        <a href="docs/IBKR_SETUP.md" target="_blank" rel="noopener" style="color: var(--accent, #4fc3f7);">
+
+      <div style="background: rgba(255,255,255,0.02); border-left: 3px solid var(--accent, #4fc3f7); padding: 14px 18px; border-radius: 2px; margin-bottom: 24px;">
+        <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 6px;">Step 1 — Generate a Flex Web Service token</div>
+        <div style="color: var(--text-secondary); font-size: 0.85rem; line-height: 1.6;">
+          In IBKR <strong>Client Portal → Performance &amp; Reports → Flex Queries</strong>,
+          scroll to the <em>Flex Web Service</em> panel, enable it if needed, and click
+          <strong>Generate token</strong>. Copy the long hex string — that's your Flex Token.
+        </div>
+      </div>
+
+      <div style="background: rgba(255,255,255,0.02); border-left: 3px solid var(--accent, #4fc3f7); padding: 14px 18px; border-radius: 2px; margin-bottom: 24px;">
+        <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 6px;">Step 2 — Create an Activity Flex Query</div>
+        <div style="color: var(--text-secondary); font-size: 0.85rem; line-height: 1.6; margin-bottom: 12px;">
+          On the same page, click <strong>Create (Activity Flex Query)</strong>. Use these
+          query-level settings:
+        </div>
+
+        <table style="width: 100%; max-width: 480px; border-collapse: collapse; font-size: 0.82rem; margin-bottom: 14px;">
+          <tbody>
+            <tr><td style="padding: 4px 8px; color: var(--text-secondary);">Name</td><td style="padding: 4px 8px;"><code>terminal-portfolio</code> (any name)</td></tr>
+            <tr><td style="padding: 4px 8px; color: var(--text-secondary);">Period</td><td style="padding: 4px 8px;"><code>Last Business Day</code> (fastest)</td></tr>
+            <tr><td style="padding: 4px 8px; color: var(--text-secondary);">Format</td><td style="padding: 4px 8px;"><code>XML</code></td></tr>
+            <tr><td style="padding: 4px 8px; color: var(--text-secondary);">Version</td><td style="padding: 4px 8px;"><code>3</code></td></tr>
+          </tbody>
+        </table>
+
+        <div style="color: var(--text-secondary); font-size: 0.85rem; line-height: 1.6; margin-bottom: 10px;">
+          Add these four sections and tick the fields inside each. Click a section to expand:
+        </div>
+
+        ${sections.map(renderSection).join('')}
+
+        <div style="color: var(--text-secondary); font-size: 0.8rem; line-height: 1.6; margin-top: 10px;">
+          Save — note the <strong>Query ID</strong> (numeric) shown in the Flex Queries list.
+        </div>
+      </div>
+
+      <div style="background: rgba(255,255,255,0.02); border-left: 3px solid var(--accent, #4fc3f7); padding: 14px 18px; border-radius: 2px; margin-bottom: 22px;">
+        <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 6px;">Step 3 — Paste into Settings</div>
+        <div style="color: var(--text-secondary); font-size: 0.85rem; line-height: 1.6;">
+          Paste your Flex Token and Query ID into <strong>Settings → Brokerage</strong>, save,
+          and reopen this view.
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <button class="auth-btn auth-btn--primary"
+                onclick="document.getElementById('settings-btn')?.click()"
+                style="padding: 10px 18px;">Open Settings</button>
+        <a href="docs/IBKR_SETUP.md" target="_blank" rel="noopener"
+           style="color: var(--accent, #4fc3f7); font-size: 0.85rem; text-decoration: none;">
           Full setup guide →
         </a>
-      </p>
-      <button class="auth-btn auth-btn--primary" onclick="document.getElementById('settings-btn')?.click()"
-              style="padding: 10px 18px;">Open Settings</button>
+      </div>
     </div>
   `;
 }

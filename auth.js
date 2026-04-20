@@ -753,6 +753,12 @@ if (settingsForm) {
     if (typeof window.wfUpdateAgentLabel === 'function') {
       window.wfUpdateAgentLabel();
     }
+    // If the user is on the PORT view, re-render it so newly-saved
+    // IBKR credentials kick off a fetch instead of leaving the setup
+    // prompt on screen.
+    if (typeof window.refreshPortfolioView === 'function') {
+      window.refreshPortfolioView();
+    }
     setTimeout(closeSettingsModal, 1500);
   });
 }
