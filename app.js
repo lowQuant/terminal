@@ -49,6 +49,10 @@ const state = {
   exchangeMap: {},                  // Loaded from /api/exchanges
   searchResults: [],
   searchActiveIndex: -1,           // Keyboard nav index in dropdown
+  // Navigation history (for back button / Backspace)
+  navHistory: [],
+  _navGoingBack: false,
+  _navSuppressNextPush: false,
   // Worksheet-based watchlist
   worksheets: _loadWorksheets(),
   activeWorksheetId: parseInt(localStorage.getItem('terminal_active_ws') || '1', 10),
@@ -83,6 +87,48 @@ function debounce(fn, ms) {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), ms);
   };
+}
+
+// ── Navigation history stack ──
+function _navPush() {
+  if (state._navGoingBack || state._navSuppressNextPush) return;
+  const entry = {
+    tab: state.activeTab,
+    fn: state.activeFunction,
+    symbol: state.symbolLoaded ? state.currentSymbol : null,
+  };
+  const prev = state.navHistory[state.navHistory.length - 1];
+  if (prev && prev.tab === entry.tab && prev.fn === entry.fn && prev.symbol === entry.symbol) return;
+  state.navHistory.push(entry);
+  if (state.navHistory.length > 50) state.navHistory.shift();
+  _navUpdateBtn();
+}
+
+function goBack() {
+  if (state.navHistory.length === 0) return;
+  state._navGoingBack = true;
+  const prev = state.navHistory.pop();
+
+  if (prev.symbol && prev.symbol !== state.currentSymbol) {
+    loadSymbol(prev.symbol);
+  }
+  if (prev.fn) {
+    openFunction(prev.fn);
+  } else if (prev.tab) {
+    setActiveTab(prev.tab);
+  }
+
+  state._navGoingBack = false;
+  _navUpdateBtn();
+}
+
+function _navUpdateBtn() {
+  const btn = document.getElementById('back-btn');
+  if (!btn) return;
+  btn.disabled = state.navHistory.length === 0;
+  btn.title = state.navHistory.length > 0
+    ? 'Go back (Backspace)'
+    : 'No navigation history';
 }
 
 // ── Initialize ──
@@ -473,6 +519,9 @@ function openFunction(code) {
   // Dismiss search dropdown
   clearSearch();
 
+  // Capture current state before mutating.
+  _navPush();
+
   state.activeFunction = code;
   state.activeTab = null;
 
@@ -486,7 +535,10 @@ function openFunction(code) {
       faState.activeTab = fn.faSubTab;
     }
 
+    // Suppress the push inside setActiveTab — we already pushed above.
+    state._navSuppressNextPush = true;
     setActiveTab(fn.tabTarget);
+    state._navSuppressNextPush = false;
 
     // Show function badge merged with the security header in the symbol bar
     const symbolBar = $('#symbol-bar');
@@ -1213,6 +1265,7 @@ function initTabs() {
 }
 
 function setActiveTab(tabName) {
+  _navPush();
   state.activeTab = tabName;
   // Exiting a function view — clear it so Home / stock tabs render normally.
   if (tabName === 'home' || tabName !== null) {
@@ -5771,6 +5824,13 @@ function initKeyboardShortcuts() {
         setActiveTab('home');
         if (symbolInput) symbolInput.blur();
       }
+      return;
+    }
+
+    // Backspace = go back in navigation history
+    if (e.key === 'Backspace') {
+      e.preventDefault();
+      goBack();
       return;
     }
 
