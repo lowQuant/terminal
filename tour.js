@@ -345,9 +345,15 @@
 
   function endTour(completed) {
     if (!tourState) return;
-    try {
-      if (completed) localStorage.setItem(STORAGE_KEY, '1');
-    } catch (_) { /* noop */ }
+    // Mark as "seen" on any dismissal — skip, close, Esc, or complete.
+    // The tour has served its purpose once the user has interacted with
+    // it. If they want to see it again they can replay it from the
+    // Help page (F1 → Start Tour). Without this, dismissing the tour
+    // on first login re-triggered it on every subsequent login.
+    try { localStorage.setItem(STORAGE_KEY, '1'); } catch (_) { /* noop */ }
+    // `completed` is kept in the signature for future telemetry use
+    // but no longer gates the storage write.
+    void completed;
 
     window.removeEventListener('resize', reposition);
     window.removeEventListener('scroll', reposition, true);
