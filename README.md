@@ -145,6 +145,12 @@ Authentication is handled via Supabase. For local dev you can either
 set up a Supabase project (see `supabase_migration.sql`) or modify
 `auth.js` to bypass auth.
 
+> **Upgrading an existing Supabase project?** When this repo adds a
+> column or table, the change ships as both an update to
+> `supabase_migration.sql` (for fresh installs) **and** a standalone,
+> idempotent file in `migrations/` (for existing installs). Apply the
+> latest migration files in date order from the Supabase SQL Editor.
+
 ### Deploy to PythonAnywhere
 
 The live demo runs on PythonAnywhere. After every `git pull`:
