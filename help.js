@@ -409,7 +409,13 @@
       if (!app || app.style.display === 'none') return;
       e.preventDefault();
       if (isHelpOpen()) closeHelp();
-      else showHelp();
+      else {
+        // Contextual: if a function is currently open, jump straight
+        // to its card so the user sees the relevant docs immediately.
+        const activeFn = window.state && window.state.activeFunction;
+        if (activeFn) showHelp(activeFn);
+        else showHelp();
+      }
       return;
     }
     if (e.key === 'Escape' && isHelpOpen()) {
