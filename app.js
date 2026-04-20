@@ -322,13 +322,47 @@ function isTvSupported(exchange) {
 // via openFunction(code). Unimplemented ones are listed as teasers.
 // ═══════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════
+//   FUNCTIONS REGISTRY
+// ═══════════════════════════════════════════════════════════
+//
+// Single source of truth for every function in the terminal.
+//
+// Core fields (used by dispatch / search / autocomplete):
+//   code         — 3-5 char identifier typed into search
+//   name         — human title shown in UI
+//   desc         — short one-liner (search result, function header)
+//   aliases      — alt search matches (include `code` itself)
+//   implemented  — false hides the function behind a SOON badge
+//   stockSpecific — requires a ticker loaded
+//   tabTarget    — routes through setActiveTab instead of rendering
+//                  its own view (DES, GP, CN, FA, IS, BS, CF, W)
+//   faSubTab     — for tabTarget=financials: which sub-tab to open
+//
+// Help-page fields (used by help.js):
+//   category     — 'market' | 'security' | 'nav' | 'soon'
+//   longDesc     — paragraph explaining the function in the Help modal
+//   related      — array of codes. Clicking a related pill scrolls
+//                  to that card. Keep ≤4; if a function is related to
+//                  many, the category view already groups peers.
+//
+// To add a function: fill in both sections, then add a case in
+// openFunction()'s switch (app.js) and (optionally) a WF tool
+// wrapper in functions/_wf_tools.py. See docs/FUNCTIONS.md for a
+// step-by-step guide.
+// ═══════════════════════════════════════════════════════════
+
 const FUNCTIONS = [
+  // ── Market-level (no ticker required) ──
   {
     code: 'ECO',
     name: 'Economic Calendar',
     desc: 'Economic data releases & events',
     aliases: ['ECO', 'ECON', 'ECONOMIC', 'CALENDAR'],
     implemented: true,
+    category: 'market',
+    longDesc: 'Macro economic calendar — GDP, CPI, payrolls, central bank decisions with impact ratings and Actual / Forecast / Prior values. Filter by country.',
+    related: ['EVTS', 'MOV'],
   },
   {
     code: 'EVTS',
@@ -336,6 +370,9 @@ const FUNCTIONS = [
     desc: 'Upcoming earnings & corporate events',
     aliases: ['EVTS', 'EVENTS', 'EARN', 'EARNINGS'],
     implemented: true,
+    category: 'market',
+    longDesc: 'Upcoming earnings with EPS estimates, market cap, reporting time. Full US coverage via NASDAQ; international via TradingView scanner. Currency-aware.',
+    related: ['ECO', 'EQS', 'MOST'],
   },
   {
     code: 'EQS',
@@ -343,27 +380,9 @@ const FUNCTIONS = [
     desc: 'Screen stocks by any fundamental, technical or price metric',
     aliases: ['EQS', 'SCREEN', 'SCREENER', 'EQUITY'],
     implemented: true,
-  },
-  {
-    code: 'CMDTY',
-    name: 'Commodity Overview',
-    desc: 'Major commodities snapshot',
-    aliases: ['CMDTY', 'COMMODITY', 'COMMODITIES'],
-    implemented: false,
-  },
-  {
-    code: 'FX',
-    name: 'Currency Cross Rates',
-    desc: 'Foreign exchange cross rates',
-    aliases: ['FX', 'FOREX', 'CURRENCY'],
-    implemented: false,
-  },
-  {
-    code: 'WEIF',
-    name: 'World Equity Futures',
-    desc: 'Global index futures',
-    aliases: ['WEIF', 'FUTURES'],
-    implemented: false,
+    category: 'market',
+    longDesc: 'Multi-factor equity screener. Pick a market, stack filters (fundamentals, technicals, price), save your presets. Powered by the TradingView scanner.',
+    related: ['MOST', 'MOV', 'EVTS'],
   },
   {
     code: 'MOST',
@@ -371,6 +390,9 @@ const FUNCTIONS = [
     desc: 'Gainers, losers, volume leaders & pre-market',
     aliases: ['MOST', 'ACTIVE', 'GAINERS', 'LOSERS', 'PREMARKET'],
     implemented: true,
+    category: 'market',
+    longDesc: 'Top gainers, losers, volume leaders, and US pre-market movers. Market-cap floor prevents microcap noise.',
+    related: ['MOV', 'EQS', 'IMAP'],
   },
   {
     code: 'MOV',
@@ -378,45 +400,9 @@ const FUNCTIONS = [
     desc: 'Which stocks drive an index up or down',
     aliases: ['MOV', 'MOVERS', 'INDEX'],
     implemented: true,
-  },
-  {
-    code: 'W',
-    name: 'Worksheet',
-    desc: 'Your personalized worksheet',
-    aliases: ['W', 'WATCHLIST', 'WORKSHEET'],
-    implemented: true,
-    tabTarget: 'watchlist',
-  },
-  {
-    code: 'OMON',
-    name: 'Options Monitor',
-    desc: 'Options chain with Greeks & volume',
-    aliases: ['OMON', 'OPTIONS', 'CHAIN', 'OPTIONCHAIN'],
-    implemented: true,
-    stockSpecific: true,
-  },
-  {
-    code: 'IVOL',
-    name: 'Options Volatility',
-    desc: 'Implied volatility smile & skew curves',
-    aliases: ['IVOL', 'OVOL', 'VOLSMILE', 'VOLA'],
-    implemented: true,
-    stockSpecific: true,
-  },
-  {
-    code: 'VCONE',
-    name: 'Volatility Cone',
-    desc: 'Historical realized vol distribution vs current IV',
-    aliases: ['VCONE', 'VOLCONE', 'VCON', 'HV'],
-    implemented: true,
-    stockSpecific: true,
-  },
-  {
-    code: 'WF',
-    name: 'Workflows',
-    desc: 'Agentic research workflows — chain functions with Claude analysis',
-    aliases: ['WF', 'WORKFLOW', 'WORKFLOWS', 'AGENT', 'RUN'],
-    implemented: true,
+    category: 'market',
+    longDesc: 'Which index constituents drove the index up or down, ranked by contribution in basis points. Answers "why did the S&P move?" — not just "how much".',
+    related: ['MOST', 'EQS', 'IMAP'],
   },
   {
     code: 'IMAP',
@@ -424,7 +410,12 @@ const FUNCTIONS = [
     desc: 'Stock, ETF, crypto & FX heatmaps with sector/asset breakdowns',
     aliases: ['IMAP', 'HEATMAP', 'HEATMAPS', 'MAP', 'STOCKMAP', 'ETFMAP', 'FXMAP'],
     implemented: true,
+    category: 'market',
+    longDesc: 'Interactive heatmaps for stocks, ETFs, crypto, and FX with sector / asset-class breakdowns.',
+    related: ['MOST', 'MOV', 'EQS'],
   },
+
+  // ── Security-specific (requires a loaded ticker) ──
   // Bloomberg tab shortcuts — route to stock-context tabs
   {
     code: 'DES',
@@ -434,6 +425,9 @@ const FUNCTIONS = [
     implemented: true,
     stockSpecific: true,
     tabTarget: 'overview',
+    category: 'security',
+    longDesc: 'Company overview — price, market cap, sector, valuation multiples (P/E, P/B, P/S, PEG), margins, earnings dates, beta, 52-week range. The front page for a single name.',
+    related: ['FA', 'GP', 'CN'],
   },
   {
     code: 'GP',
@@ -443,6 +437,9 @@ const FUNCTIONS = [
     implemented: true,
     stockSpecific: true,
     tabTarget: 'chart',
+    category: 'security',
+    longDesc: 'Interactive price chart. TradingView embed where supported, Lightweight Charts + yfinance fallback otherwise.',
+    related: ['DES', 'CN', 'OMON'],
   },
   {
     code: 'CN',
@@ -452,6 +449,9 @@ const FUNCTIONS = [
     implemented: true,
     stockSpecific: true,
     tabTarget: 'news',
+    category: 'security',
+    longDesc: 'Recent news with an in-app reader modal (full-text extraction via trafilatura). Headlines, publishers, timestamps, thumbnails, summaries.',
+    related: ['DES', 'GP'],
   },
   {
     code: 'FA',
@@ -461,6 +461,9 @@ const FUNCTIONS = [
     implemented: true,
     stockSpecific: true,
     tabTarget: 'financials',
+    category: 'security',
+    longDesc: 'Financial analysis — margins, ROE, ROA, growth, PE / PEG, dividend yield, payout ratio, beta. Overhaul planned: full IS / BS / CF with quarterly & annual periods.',
+    related: ['IS', 'BS', 'CF', 'DES'],
   },
   {
     code: 'IS',
@@ -471,6 +474,9 @@ const FUNCTIONS = [
     stockSpecific: true,
     tabTarget: 'financials',
     faSubTab: 'income',
+    category: 'security',
+    longDesc: 'Income Statement view — revenue, expenses, net income. Part of the FA module.',
+    related: ['FA', 'BS', 'CF'],
   },
   {
     code: 'BS',
@@ -481,6 +487,9 @@ const FUNCTIONS = [
     stockSpecific: true,
     tabTarget: 'financials',
     faSubTab: 'balance',
+    category: 'security',
+    longDesc: 'Balance Sheet view — assets, liabilities, equity. Part of the FA module.',
+    related: ['FA', 'IS', 'CF'],
   },
   {
     code: 'CF',
@@ -491,8 +500,103 @@ const FUNCTIONS = [
     stockSpecific: true,
     tabTarget: 'financials',
     faSubTab: 'cashflow',
+    category: 'security',
+    longDesc: 'Cash Flow view — operating, investing, financing. Part of the FA module.',
+    related: ['FA', 'IS', 'BS'],
+  },
+  {
+    code: 'OMON',
+    name: 'Options Monitor',
+    desc: 'Options chain with Greeks & volume',
+    aliases: ['OMON', 'OPTIONS', 'CHAIN', 'OPTIONCHAIN'],
+    implemented: true,
+    stockSpecific: true,
+    category: 'security',
+    longDesc: 'Full options chain for a single expiration with Black-Scholes Greeks (delta, gamma, theta, vega). Calls and puts side by side.',
+    related: ['IVOL', 'VCONE', 'GP'],
+  },
+  {
+    code: 'IVOL',
+    name: 'Options Volatility',
+    desc: 'Implied volatility smile & skew curves',
+    aliases: ['IVOL', 'OVOL', 'VOLSMILE', 'VOLA'],
+    implemented: true,
+    stockSpecific: true,
+    category: 'security',
+    longDesc: 'Implied volatility smile / skew across expirations. OI-weighted IV per strike, with per-expiration curve overlay so you can compare term structure visually.',
+    related: ['OMON', 'VCONE'],
+  },
+  {
+    code: 'VCONE',
+    name: 'Volatility Cone',
+    desc: 'Historical realized vol distribution vs current IV',
+    aliases: ['VCONE', 'VOLCONE', 'VCON', 'HV'],
+    implemented: true,
+    stockSpecific: true,
+    category: 'security',
+    longDesc: 'Volatility cone — historical realized vol distribution across multiple windows vs current IV. Spots where realized is cheap / rich relative to history.',
+    related: ['IVOL', 'OMON'],
+  },
+
+  // ── Navigation & agent ──
+  {
+    code: 'W',
+    name: 'Worksheet',
+    desc: 'Your personalized worksheet',
+    aliases: ['W', 'WATCHLIST', 'WORKSHEET'],
+    implemented: true,
+    tabTarget: 'watchlist',
+    category: 'nav',
+    longDesc: 'Personal worksheet(s) with live enriched quotes — price, change %, volume, relative volume, market cap, earnings proximity, news heat. Split-view with chart.',
+    related: ['WF', 'DES', 'EQS'],
+  },
+  {
+    code: 'WF',
+    name: 'Workflows',
+    desc: 'Agentic research workflows — chain functions with Claude analysis',
+    aliases: ['WF', 'WORKFLOW', 'WORKFLOWS', 'AGENT', 'RUN'],
+    implemented: true,
+    category: 'nav',
+    longDesc: 'Agentic research workflows — chain functions together with Claude / GPT / Gemini / Perplexity analysis. Builder UI, saved workflows, natural-language compiler.',
+    related: ['W', 'EQS', 'EVTS'],
+  },
+
+  // ── Coming soon (implemented: false) ──
+  {
+    code: 'CMDTY',
+    name: 'Commodity Overview',
+    desc: 'Major commodities snapshot',
+    aliases: ['CMDTY', 'COMMODITY', 'COMMODITIES'],
+    implemented: false,
+    category: 'soon',
+    longDesc: 'Commodity overview — major commodities snapshot. Not started yet.',
+    related: [],
+  },
+  {
+    code: 'FX',
+    name: 'Currency Cross Rates',
+    desc: 'Foreign exchange cross rates',
+    aliases: ['FX', 'FOREX', 'CURRENCY'],
+    implemented: false,
+    category: 'soon',
+    longDesc: 'Currency cross rates. FX is already wired as a cross-cutting conversion service (ECB rates, used by EVTS / MOST / MOV currency dropdowns); a dedicated FX function is planned.',
+    related: [],
+  },
+  {
+    code: 'WEIF',
+    name: 'World Equity Futures',
+    desc: 'Global index futures',
+    aliases: ['WEIF', 'FUTURES'],
+    implemented: false,
+    category: 'soon',
+    longDesc: 'World Equity Futures — global index futures. Not started yet.',
+    related: [],
   },
 ];
+
+// Expose for help.js / tour.js / other scripts. `const` at script
+// top level does NOT attach to window automatically.
+window.FUNCTIONS = FUNCTIONS;
 
 function matchFunctions(query) {
   const q = query.trim().toUpperCase();

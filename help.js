@@ -14,124 +14,11 @@
   'use strict';
 
   // ── Help data ─────────────────────────────────────────────
-  // Each entry augments an entry in the FUNCTIONS registry
-  // (defined in app.js) with richer docs: category, related
-  // functions, a long-form description, and how-to-invoke copy.
-  // Codes must match FUNCTIONS[*].code so we can join on them.
-  const HELP_EXTRA = {
-    // ── Market-level ──
-    ECO: {
-      category: 'market',
-      longDesc: 'Macro economic calendar — GDP, CPI, payrolls, central bank decisions with impact ratings and Actual / Forecast / Prior values. Filter by country.',
-      related: ['EVTS', 'MOV'],
-    },
-    EVTS: {
-      category: 'market',
-      longDesc: 'Upcoming earnings with EPS estimates, market cap, reporting time. Full US coverage via NASDAQ; international via TradingView scanner. Currency-aware.',
-      related: ['ECO', 'EQS', 'MOST'],
-    },
-    EQS: {
-      category: 'market',
-      longDesc: 'Multi-factor equity screener. Pick a market, stack filters (fundamentals, technicals, price), save your presets. Powered by the TradingView scanner.',
-      related: ['MOST', 'MOV', 'EVTS'],
-    },
-    MOST: {
-      category: 'market',
-      longDesc: 'Top gainers, losers, volume leaders, and US pre-market movers. Market-cap floor prevents microcap noise.',
-      related: ['MOV', 'EQS', 'IMAP'],
-    },
-    MOV: {
-      category: 'market',
-      longDesc: 'Which index constituents drove the index up or down, ranked by contribution in basis points. Answers "why did the S&P move?" — not just "how much".',
-      related: ['MOST', 'EQS', 'IMAP'],
-    },
-    IMAP: {
-      category: 'market',
-      longDesc: 'Interactive heatmaps for stocks, ETFs, crypto, and FX with sector / asset-class breakdowns.',
-      related: ['MOST', 'MOV', 'EQS'],
-    },
-
-    // ── Stock-specific ──
-    DES: {
-      category: 'security',
-      longDesc: 'Company overview — price, market cap, sector, valuation multiples (P/E, P/B, P/S, PEG), margins, earnings dates, beta, 52-week range. The front page for a single name.',
-      related: ['FA', 'GP', 'CN'],
-    },
-    GP: {
-      category: 'security',
-      longDesc: 'Interactive price chart. TradingView embed where supported, Lightweight Charts + yfinance fallback otherwise.',
-      related: ['DES', 'CN', 'OMON'],
-    },
-    CN: {
-      category: 'security',
-      longDesc: 'Recent news with an in-app reader modal (full-text extraction via trafilatura). Headlines, publishers, timestamps, thumbnails, summaries.',
-      related: ['DES', 'GP'],
-    },
-    FA: {
-      category: 'security',
-      longDesc: 'Financial analysis — margins, ROE, ROA, growth, PE / PEG, dividend yield, payout ratio, beta. Overhaul planned: full IS / BS / CF with quarterly & annual periods.',
-      related: ['IS', 'BS', 'CF', 'DES'],
-    },
-    IS: {
-      category: 'security',
-      longDesc: 'Income Statement view — revenue, expenses, net income. Part of the FA module.',
-      related: ['FA', 'BS', 'CF'],
-    },
-    BS: {
-      category: 'security',
-      longDesc: 'Balance Sheet view — assets, liabilities, equity. Part of the FA module.',
-      related: ['FA', 'IS', 'CF'],
-    },
-    CF: {
-      category: 'security',
-      longDesc: 'Cash Flow view — operating, investing, financing. Part of the FA module.',
-      related: ['FA', 'IS', 'BS'],
-    },
-    OMON: {
-      category: 'security',
-      longDesc: 'Full options chain for a single expiration with Black-Scholes Greeks (delta, gamma, theta, vega). Calls and puts side by side.',
-      related: ['IVOL', 'VCONE', 'GP'],
-    },
-    IVOL: {
-      category: 'security',
-      longDesc: 'Implied volatility smile / skew across expirations. OI-weighted IV per strike, with per-expiration curve overlay so you can compare term structure visually.',
-      related: ['OMON', 'VCONE'],
-    },
-    VCONE: {
-      category: 'security',
-      longDesc: 'Volatility cone — historical realized vol distribution across multiple windows vs current IV. Spots where realized is cheap / rich relative to history.',
-      related: ['IVOL', 'OMON'],
-    },
-
-    // ── Navigation / agentic ──
-    W: {
-      category: 'nav',
-      longDesc: 'Personal worksheet(s) with live enriched quotes — price, change %, volume, relative volume, market cap, earnings proximity, news heat. Split-view with chart.',
-      related: ['WF', 'DES', 'EQS'],
-    },
-    WF: {
-      category: 'nav',
-      longDesc: 'Agentic research workflows — chain functions together with Claude / GPT / Gemini / Perplexity analysis. Builder UI, saved workflows, natural-language compiler.',
-      related: ['W', 'EQS', 'EVTS'],
-    },
-
-    // ── Not yet implemented ──
-    CMDTY: {
-      category: 'soon',
-      longDesc: 'Commodity overview — major commodities snapshot. Not started yet.',
-      related: [],
-    },
-    FX: {
-      category: 'soon',
-      longDesc: 'Currency cross rates. FX is already wired as a cross-cutting conversion service (ECB rates, used by EVTS / MOST / MOV currency dropdowns); a dedicated FX function is planned.',
-      related: [],
-    },
-    WEIF: {
-      category: 'soon',
-      longDesc: 'World Equity Futures — global index futures. Not started yet.',
-      related: [],
-    },
-  };
+  // The `category`, `longDesc`, and `related` fields live directly on
+  // each entry in the FUNCTIONS registry (see app.js — single source
+  // of truth). To add / edit function help: update FUNCTIONS there.
+  // If an entry is missing `category`, we default to 'security' for
+  // stockSpecific, 'soon' for !implemented, else 'nav'.
 
   const CATEGORY_META = {
     market:   { label: 'Market-level',    hint: 'No ticker required — global data',          order: 1 },
@@ -217,17 +104,31 @@
     }).join('');
   }
 
+  // Resolve a category for a FUNCTIONS entry. Prefer the explicit
+  // `category` field on the entry; otherwise infer from its flags.
+  function _categoryFor(fn) {
+    if (fn.category) return fn.category;
+    if (fn.implemented === false) return 'soon';
+    if (fn.stockSpecific) return 'security';
+    return 'nav';
+  }
+
   function _renderFunctions() {
     const host = document.getElementById('help-functions');
     if (!host) return;
     const fns = (window.FUNCTIONS || []).slice();
+    if (fns.length === 0) {
+      host.innerHTML = `<p class="help-section__hint" style="padding:24px;text-align:center">
+        Function registry not ready yet — try reopening Help.
+      </p>`;
+      return;
+    }
     // Group by category
     const groups = {};
     fns.forEach(fn => {
-      const extra = HELP_EXTRA[fn.code] || {};
-      const cat = extra.category || 'security';
+      const cat = _categoryFor(fn);
       if (!groups[cat]) groups[cat] = [];
-      groups[cat].push(Object.assign({}, fn, extra));
+      groups[cat].push(fn);
     });
 
     const ordered = Object.keys(groups).sort((a, b) => {
@@ -410,10 +311,20 @@
       e.preventDefault();
       if (isHelpOpen()) closeHelp();
       else {
-        // Contextual: if a function is currently open, jump straight
-        // to its card so the user sees the relevant docs immediately.
-        const activeFn = window.state && window.state.activeFunction;
-        if (activeFn) showHelp(activeFn);
+        // Contextual: deep-link to the most relevant function card.
+        //   1. explicit state.activeFunction (OMON, EVTS, ECO, …)
+        //   2. the function that owns the current stock-context tab
+        //      (overview→DES, chart→GP, news→CN, financials→FA, watchlist→W)
+        const st = window.state || {};
+        const tabToCode = {
+          overview: 'DES',
+          chart: 'GP',
+          news: 'CN',
+          financials: 'FA',
+          watchlist: 'W',
+        };
+        const code = st.activeFunction || tabToCode[st.activeTab] || null;
+        if (code) showHelp(code);
         else showHelp();
       }
       return;
