@@ -16,6 +16,8 @@ try {
   console.warn('Supabase client not initialized — running in demo mode.', e);
   supabaseClient = null;
 }
+// Expose to sibling scripts (app.js uses this for watchlist sync)
+window.supabaseClient = supabaseClient;
 
 // ── Auth State ──
 const auth = {
@@ -129,6 +131,12 @@ function showTerminal(user) {
   // Initialize the terminal app (defined in app.js)
   if (typeof initTerminal === 'function') {
     initTerminal();
+  }
+
+  // Pull watchlists from Supabase so they sync across devices.
+  // Fire-and-forget — the UI already rendered from localStorage cache.
+  if (typeof window.syncWatchlistsFromSupabase === 'function') {
+    window.syncWatchlistsFromSupabase();
   }
 
   // First-time users: show the onboarding tour (defined in tour.js).
@@ -364,6 +372,9 @@ async function initAuth() {
 
       processLogin(session.user);
     } else if (event === 'SIGNED_OUT') {
+      if (typeof window.resetWatchlistSync === 'function') {
+        window.resetWatchlistSync();
+      }
       showWelcome();
     }
   });

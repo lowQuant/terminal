@@ -5390,12 +5390,123 @@ function wlRenderHeatBars(heat) {
 }
 
 function saveWorksheets() {
-  localStorage.setItem('terminal_worksheets', JSON.stringify(state.worksheets));
+  // Strip transient sync fields (remote_id is re-fetched; _remotePromise
+  // would serialize to {} and confuse the await helper on reload).
+  const cache = state.worksheets.map(({ remote_id, _remotePromise, ...rest }) => rest);
+  localStorage.setItem('terminal_worksheets', JSON.stringify(cache));
   localStorage.setItem('terminal_active_ws', String(state.activeWorksheetId));
   // Keep the ticker tape fresh when it's mirroring the watchlist.
   if (state.tapeConfig && state.tapeConfig.mode === 'watchlist') {
     try { renderTickerTape(); } catch (_) {}
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WATCHLIST ↔ SUPABASE SYNC
+// Supabase is the source of truth across devices. localStorage remains
+// the offline cache for instant first paint. All sync calls are
+// fire-and-forget: failures are logged but never break the UI.
+// ═══════════════════════════════════════════════════════════════════
+
+function _wlCanSync() {
+  return !!(window.supabaseClient && window.auth && window.auth.user);
+}
+
+// When a new worksheet is created we don't have its UUID yet. We stash
+// the pending insert on the worksheet object so subsequent ticker ops
+// can chain off it.
+async function _wlAwaitRemoteId(ws) {
+  if (!ws) return null;
+  if (ws.remote_id) return ws.remote_id;
+  if (ws._remotePromise) {
+    try { await ws._remotePromise; } catch (_) {}
+  }
+  return ws.remote_id || null;
+}
+
+async function _wlRemoteCreateSheet(ws) {
+  if (!_wlCanSync()) return;
+  const { data, error } = await window.supabaseClient
+    .from('watchlists')
+    .insert({ user_id: window.auth.user.id, name: ws.name })
+    .select('id')
+    .single();
+  if (error) throw error;
+  ws.remote_id = data.id;
+}
+
+async function _wlRemoteAddItem(ws, ticker, sortIdx) {
+  if (!_wlCanSync()) return;
+  const remoteId = await _wlAwaitRemoteId(ws);
+  if (!remoteId) return;
+  const { error } = await window.supabaseClient
+    .from('watchlist_items')
+    .insert({
+      watchlist_id:   remoteId,
+      yf_ticker:      ticker.symbol,
+      display_name:   ticker.name || ticker.symbol,
+      exchange_label: ticker.exchange || '',
+      tv_symbol:      ticker.exchange ? `${ticker.exchange}:${ticker.symbol}` : ticker.symbol,
+      sort_order:     sortIdx,
+    });
+  if (error) throw error;
+}
+
+async function _wlRemoteRemoveItem(ws, symbol) {
+  if (!_wlCanSync()) return;
+  const remoteId = await _wlAwaitRemoteId(ws);
+  if (!remoteId) return;
+  const { error } = await window.supabaseClient
+    .from('watchlist_items')
+    .delete()
+    .match({ watchlist_id: remoteId, yf_ticker: symbol });
+  if (error) throw error;
+}
+
+async function _wlRemoteReplaceItem(ws, oldSymbol, newTicker, sortIdx) {
+  if (!_wlCanSync()) return;
+  const remoteId = await _wlAwaitRemoteId(ws);
+  if (!remoteId) return;
+  const { error } = await window.supabaseClient
+    .from('watchlist_items')
+    .update({
+      yf_ticker:      newTicker.symbol,
+      display_name:   newTicker.name || newTicker.symbol,
+      exchange_label: newTicker.exchange || '',
+      tv_symbol:      newTicker.exchange ? `${newTicker.exchange}:${newTicker.symbol}` : newTicker.symbol,
+      sort_order:     sortIdx,
+    })
+    .match({ watchlist_id: remoteId, yf_ticker: oldSymbol });
+  if (error) throw error;
+}
+
+async function _wlRemoteRenameSheet(ws) {
+  if (!_wlCanSync()) return;
+  const remoteId = await _wlAwaitRemoteId(ws);
+  if (!remoteId) return;
+  const { error } = await window.supabaseClient
+    .from('watchlists')
+    .update({ name: ws.name })
+    .eq('id', remoteId);
+  if (error) throw error;
+}
+
+async function _wlRemoteDeleteSheet(ws) {
+  if (!_wlCanSync()) return;
+  const remoteId = await _wlAwaitRemoteId(ws);
+  if (!remoteId) return;
+  // ON DELETE CASCADE on watchlist_items → items go with the sheet.
+  const { error } = await window.supabaseClient
+    .from('watchlists')
+    .delete()
+    .eq('id', remoteId);
+  if (error) throw error;
+}
+
+function _wlBg(promise, label) {
+  Promise.resolve(promise).catch((err) => {
+    console.warn('[watchlist sync] ' + label + ':', err);
+  });
 }
 
 function addToWatchlist(symbol, exchange, name) {
@@ -5411,6 +5522,7 @@ function addToWatchlist(symbol, exchange, name) {
     ws.tickers.push({ symbol, exchange, name });
     saveWorksheets();
     if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+    _wlBg(_wlRemoteAddItem(ws, { symbol, exchange, name }, ws.tickers.length - 1), 'add item');
   }
 }
 
@@ -5420,15 +5532,21 @@ function removeFromWatchlist(symbol) {
   ws.tickers = ws.tickers.filter(t => t.symbol !== symbol);
   saveWorksheets();
   if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+  _wlBg(_wlRemoteRemoveItem(ws, symbol), 'remove item');
 }
 
 function addWorksheet() {
   const maxId = Math.max(...state.worksheets.map(w => w.id), 0);
   const newId = maxId + 1;
-  state.worksheets.push({ id: newId, name: `Sheet ${newId}`, tickers: [] });
+  const newWs = { id: newId, name: `Sheet ${newId}`, tickers: [] };
+  state.worksheets.push(newWs);
   state.activeWorksheetId = newId;
   saveWorksheets();
   if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+  if (_wlCanSync()) {
+    newWs._remotePromise = _wlRemoteCreateSheet(newWs);
+    _wlBg(newWs._remotePromise, 'create sheet');
+  }
 }
 
 function switchWorksheet(id) {
@@ -5443,12 +5561,14 @@ function deleteWorksheet(id) {
     showToast('Cannot delete the last worksheet');
     return;
   }
+  const ws = state.worksheets.find(w => w.id === id);
   state.worksheets = state.worksheets.filter(w => w.id !== id);
   if (state.activeWorksheetId === id) {
     state.activeWorksheetId = state.worksheets[0].id;
   }
   saveWorksheets();
   if (state.activeTab === 'watchlist') renderWatchlist($('#dashboard'));
+  if (ws) _wlBg(_wlRemoteDeleteSheet(ws), 'delete sheet');
 }
 
 function renameWorksheet(id, newName) {
@@ -5456,6 +5576,169 @@ function renameWorksheet(id, newName) {
   if (ws) {
     ws.name = newName.trim() || ws.name;
     saveWorksheets();
+    _wlBg(_wlRemoteRenameSheet(ws), 'rename sheet');
+  }
+}
+
+// ── Hydrate worksheets from Supabase (source of truth across devices) ──
+let _wlSyncInFlight = null;
+
+function resetWatchlistSync() {
+  _wlSyncInFlight = null;
+}
+window.resetWatchlistSync = resetWatchlistSync;
+
+async function syncWatchlistsFromSupabase() {
+  if (!_wlCanSync()) return;
+  if (_wlSyncInFlight) return _wlSyncInFlight;
+  _wlSyncInFlight = (async () => {
+    try {
+      const userId = window.auth.user.id;
+      const sc = window.supabaseClient;
+
+      const { data: wls, error: wlErr } = await sc
+        .from('watchlists')
+        .select('id, name, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+      if (wlErr) throw wlErr;
+
+      const wlIds = (wls || []).map(w => w.id);
+      let items = [];
+      if (wlIds.length) {
+        const { data, error } = await sc
+          .from('watchlist_items')
+          .select('watchlist_id, yf_ticker, display_name, exchange_label, sort_order')
+          .in('watchlist_id', wlIds)
+          .order('sort_order', { ascending: true });
+        if (error) throw error;
+        items = data || [];
+      }
+
+      const migrated     = localStorage.getItem('terminal_watchlists_migrated') === '1';
+      const localHasData = state.worksheets.some(w => (w.tickers || []).length > 0);
+      // The signup trigger creates a lone empty "Default" row; treat
+      // that as "remote is empty" so we can migrate local data into it.
+      const remoteEmpty  = items.length === 0 && (wls || []).length <= 1;
+
+      if (remoteEmpty && !migrated && localHasData) {
+        await _wlPushLocalToSupabase(wls || [], userId);
+        localStorage.setItem('terminal_watchlists_migrated', '1');
+        await _wlHydrateFromRemote(userId);
+        return;
+      }
+      if (remoteEmpty && !migrated) {
+        localStorage.setItem('terminal_watchlists_migrated', '1');
+      }
+
+      _wlApplyRemoteData(wls || [], items);
+    } catch (err) {
+      console.warn('[watchlist sync] failed:', err);
+    } finally {
+      // Allow re-sync on next login/token-refresh.
+      _wlSyncInFlight = null;
+    }
+  })();
+  return _wlSyncInFlight;
+}
+window.syncWatchlistsFromSupabase = syncWatchlistsFromSupabase;
+
+async function _wlHydrateFromRemote(userId) {
+  const sc = window.supabaseClient;
+  const { data: wls } = await sc
+    .from('watchlists')
+    .select('id, name, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  const wlIds = (wls || []).map(w => w.id);
+  let items = [];
+  if (wlIds.length) {
+    const { data } = await sc
+      .from('watchlist_items')
+      .select('watchlist_id, yf_ticker, display_name, exchange_label, sort_order')
+      .in('watchlist_id', wlIds)
+      .order('sort_order', { ascending: true });
+    items = data || [];
+  }
+  _wlApplyRemoteData(wls || [], items);
+}
+
+function _wlApplyRemoteData(wls, items) {
+  if (!wls.length) return; // nothing to apply — keep local cache
+  const byWl = {};
+  items.forEach((it) => {
+    (byWl[it.watchlist_id] = byWl[it.watchlist_id] || []).push(it);
+  });
+  const newWorksheets = wls.map((w, i) => ({
+    id: i + 1,
+    remote_id: w.id,
+    name: w.name,
+    tickers: (byWl[w.id] || []).map(it => ({
+      symbol:   it.yf_ticker,
+      exchange: it.exchange_label || '',
+      name:     it.display_name || it.yf_ticker,
+    })),
+  }));
+
+  // Preserve active sheet by name when possible.
+  const prevActive = state.worksheets.find(w => w.id === state.activeWorksheetId);
+  state.worksheets = newWorksheets;
+  const match = prevActive ? newWorksheets.find(w => w.name === prevActive.name) : null;
+  state.activeWorksheetId = match ? match.id : newWorksheets[0].id;
+
+  // Refresh the cache. Strip remote_id so the JSON stays clean — it'll
+  // be re-populated on the next sync anyway.
+  const cache = newWorksheets.map(({ remote_id, _remotePromise, ...rest }) => rest);
+  localStorage.setItem('terminal_worksheets', JSON.stringify(cache));
+  localStorage.setItem('terminal_active_ws', String(state.activeWorksheetId));
+
+  if (state.activeTab === 'watchlist' && typeof renderWatchlist === 'function') {
+    try { renderWatchlist($('#dashboard')); } catch (_) {}
+  }
+  if (state.tapeConfig && state.tapeConfig.mode === 'watchlist') {
+    try { renderTickerTape(); } catch (_) {}
+  }
+}
+
+async function _wlPushLocalToSupabase(existingWatchlists, userId) {
+  const sc = window.supabaseClient;
+  const reuseDefault = existingWatchlists.find(w => w.name === 'Default') || existingWatchlists[0];
+  const local = state.worksheets || [];
+
+  for (let i = 0; i < local.length; i++) {
+    const sheet = local[i];
+    let remoteId;
+    if (i === 0 && reuseDefault) {
+      if (sheet.name && sheet.name !== reuseDefault.name) {
+        const { error } = await sc
+          .from('watchlists')
+          .update({ name: sheet.name })
+          .eq('id', reuseDefault.id);
+        if (error) throw error;
+      }
+      remoteId = reuseDefault.id;
+    } else {
+      const { data, error } = await sc
+        .from('watchlists')
+        .insert({ user_id: userId, name: sheet.name })
+        .select('id')
+        .single();
+      if (error) throw error;
+      remoteId = data.id;
+    }
+    sheet.remote_id = remoteId;
+    if (sheet.tickers && sheet.tickers.length) {
+      const rows = sheet.tickers.map((t, idx) => ({
+        watchlist_id:   remoteId,
+        yf_ticker:      t.symbol,
+        display_name:   t.name || t.symbol,
+        exchange_label: t.exchange || '',
+        tv_symbol:      t.exchange ? `${t.exchange}:${t.symbol}` : t.symbol,
+        sort_order:     idx,
+      }));
+      const { error } = await sc.from('watchlist_items').insert(rows);
+      if (error) throw error;
+    }
   }
 }
 
@@ -5702,10 +5985,13 @@ async function wlEditTickerSearch(query) {
 function wlSelectEditTicker(newSymbol, newExchange, newName) {
   const ws = state.worksheets.find(w => w.id === state.activeWorksheetId);
   if (ws && state.wlEditingSymbol) {
-    const idx = ws.tickers.findIndex(t => t.symbol === state.wlEditingSymbol);
+    const oldSymbol = state.wlEditingSymbol;
+    const idx = ws.tickers.findIndex(t => t.symbol === oldSymbol);
     if (idx !== -1) {
-      ws.tickers[idx] = { symbol: newSymbol, exchange: newExchange, name: newName };
+      const replacement = { symbol: newSymbol, exchange: newExchange, name: newName };
+      ws.tickers[idx] = replacement;
       saveWorksheets();
+      _wlBg(_wlRemoteReplaceItem(ws, oldSymbol, replacement, idx), 'replace item');
     }
   }
   state.wlEditingSymbol = null;
