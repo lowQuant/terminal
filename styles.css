@@ -1469,6 +1469,13 @@ body {
   padding: 2px 6px;
   border-radius: var(--radius);
   transition: all 0.1s var(--ease);
+  /* Reset native <button> styling so all three buttons render
+     identically — without this, Safari renders the last button
+     (which has no explicit border-right) as a rounded pill. */
+  background: transparent;
+  border: 0;
+  -webkit-appearance: none;
+  appearance: none;
 }
 .wl-split-toggle:hover {
   color: var(--text-secondary);
