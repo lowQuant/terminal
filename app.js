@@ -529,13 +529,13 @@ const FUNCTIONS = [
   {
     code: 'VCONE',
     name: 'Volatility Cone',
-    desc: 'Historical realized vol distribution vs current IV',
-    aliases: ['VCONE', 'VOLCONE', 'VCON', 'HV'],
+    desc: 'Options — is implied vol attractive to sell? (Realized-vs-IV cone)',
+    aliases: ['VCONE', 'VOLCONE', 'VCON', 'HV', 'SELLVOL'],
     implemented: true,
     stockSpecific: true,
     category: 'security',
-    longDesc: 'Volatility cone — historical realized vol distribution across multiple windows vs current IV. Spots where realized is cheap / rich relative to history.',
-    related: ['IVOL', 'OMON'],
+    longDesc: 'Options tool for deciding whether to sell or buy implied volatility. Plots realized vol percentiles across multiple lookback windows against current IV — when IV sits above the realized-vol distribution it\'s "rich" (attractive to sell via short straddles, iron condors, covered calls); when it sits below, it\'s "cheap" (long vol setups). Pairs with IVOL for skew/term structure and OMON for chain pricing.',
+    related: ['IVOL', 'OMON', 'GP'],
   },
 
   // ── Navigation & agent ──

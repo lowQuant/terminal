@@ -561,10 +561,22 @@ def run_workflow_agentic(
         if content.strip():
             emit("agent_thought", {"text": content})
 
-        # Build the assistant message for the transcript
-        assistant_msg: Dict[str, Any] = {"role": "assistant", "content": content}
+        # Build the assistant message for the transcript.
+        #
+        # When the model replies with only tool_calls and no text,
+        # ``content`` is ``""``. That's fine for OpenAI's own API, but
+        # OpenRouter's proxy to Gemini translates an empty string into
+        # a zero-length text part and then Gemini rejects the next
+        # turn with: "Unable to submit request because it must
+        # include at least one parts field". The OpenAI spec answer
+        # for tool-only replies is ``content: null``, which every
+        # provider including OpenRouter/Gemini handles correctly.
+        assistant_msg: Dict[str, Any] = {"role": "assistant"}
         if tool_calls:
             assistant_msg["tool_calls"] = tool_calls
+            assistant_msg["content"] = content if content.strip() else None
+        else:
+            assistant_msg["content"] = content
         messages.append(assistant_msg)
 
         # Terminal: no tool calls → model is done
