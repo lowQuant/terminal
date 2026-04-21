@@ -488,6 +488,31 @@
             <input class="auth-form__input" type="password" id="key-openrouter" placeholder="sk-or-v1-...">
           </div>
 
+          <div class="settings-divider">
+            <span>Brokerage</span>
+          </div>
+
+          <p style="color: var(--text-secondary); margin: 0 0 14px; font-size: 0.8rem; line-height: 1.5;">
+            Link your Interactive Brokers account via the <strong>Flex Web Service</strong> — a
+            read-only XML API. The token cannot place trades, move funds, or change settings;
+            revoke it any time in IBKR Account Management. Data is EOD. See
+            <a href="docs/IBKR_SETUP.md" target="_blank" rel="noopener" style="color: var(--accent, #4fc3f7);">setup guide</a>
+            for how to generate the token and Query ID.
+          </p>
+
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="ibkr-flex-token">
+              IBKR Flex Token
+              <span class="key-status" id="status-ibkr"></span>
+            </label>
+            <input class="auth-form__input" type="password" id="ibkr-flex-token" placeholder="Paste your Flex Web Service token">
+          </div>
+
+          <div class="auth-form__group">
+            <label class="auth-form__label" for="ibkr-flex-query">Flex Query ID</label>
+            <input class="auth-form__input" type="text" id="ibkr-flex-query" placeholder="Numeric Query ID (e.g. 1234567)">
+          </div>
+
           <div class="auth-form__error" id="settings-error" style="display:none"></div>
           <div class="auth-form__success" id="settings-success" style="color: var(--green); font-size: 0.85rem; margin-bottom: 1rem; display: none;">Saved successfully!</div>
           <button class="auth-btn auth-btn--primary" type="submit" id="settings-submit" style="width: 100%;">

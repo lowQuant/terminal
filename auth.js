@@ -83,7 +83,7 @@ async function processLogin(user) {
   if (supabaseClient) {
     const { data: profile } = await supabaseClient
       .from('profiles')
-      .select('is_active, llm_keys')
+      .select('is_active, llm_keys, broker_config')
       .eq('id', user.id)
       .single();
 
@@ -100,9 +100,10 @@ async function processLogin(user) {
         return; // Do not render terminal
       }
       
-      // Store LLM Keys for the session
+      // Store LLM Keys + brokerage config for the session
       window.User = window.User || {};
       window.User.llm_keys = profile.llm_keys || {};
+      window.User.broker_config = profile.broker_config || {};
       // If the WF hub is already rendered, refresh its agent chip
       if (typeof window.wfUpdateAgentLabel === 'function') {
         window.wfUpdateAgentLabel();
@@ -511,11 +512,24 @@ if (settingsForm) {
       dot.textContent = has ? '● set' : '○ not set';
       dot.className = 'key-status ' + (has ? 'key-status--set' : 'key-status--unset');
     });
+    // IBKR: set iff both token and query ID are present
+    const ibkrDot = document.getElementById('status-ibkr');
+    const ibkrTok = document.getElementById('ibkr-flex-token');
+    const ibkrQry = document.getElementById('ibkr-flex-query');
+    if (ibkrDot && ibkrTok && ibkrQry) {
+      const has = ibkrTok.value.trim().length > 0 && ibkrQry.value.trim().length > 0;
+      ibkrDot.textContent = has ? '● set' : '○ not set';
+      ibkrDot.className = 'key-status ' + (has ? 'key-status--set' : 'key-status--unset');
+    }
   }
 
   // Refresh chip state whenever a key input changes
   ['anthropic', 'openai', 'gemini', 'perplexity', 'openrouter'].forEach((p) => {
     const input = document.getElementById(`key-${p}`);
+    if (input) input.addEventListener('input', updateKeyStatuses);
+  });
+  ['ibkr-flex-token', 'ibkr-flex-query'].forEach((id) => {
+    const input = document.getElementById(id);
     if (input) input.addEventListener('input', updateKeyStatuses);
   });
 
@@ -615,7 +629,7 @@ if (settingsForm) {
 
     const { data: profile, error } = await supabaseClient
       .from('profiles')
-      .select('llm_keys')
+      .select('llm_keys, broker_config')
       .eq('id', auth.user.id)
       .single();
 
@@ -631,6 +645,13 @@ if (settingsForm) {
     document.getElementById('key-gemini').value     = keys.gemini     || '';
     document.getElementById('key-perplexity').value = keys.perplexity || '';
     document.getElementById('key-openrouter').value = keys.openrouter || '';
+
+    // Brokerage (IBKR Flex)
+    const broker = (profile && profile.broker_config) || {};
+    const flex = ((broker.ibkr || {}).flex) || {};
+    document.getElementById('ibkr-flex-token').value = flex.token    || '';
+    document.getElementById('ibkr-flex-query').value = flex.query_id || '';
+
     updateKeyStatuses();
 
     // Provider + model selection
@@ -640,6 +661,7 @@ if (settingsForm) {
 
     window.User = window.User || {};
     window.User.llm_keys = keys;
+    window.User.broker_config = broker;
   });
 
   // Cheap fallback for old profiles missing the `provider` field
@@ -690,9 +712,27 @@ if (settingsForm) {
       err.style.display = 'block';
     }
 
+    // Brokerage config — IBKR Flex. Preserve any non-IBKR sections
+    // the server may add later (e.g. other brokers).
+    const existingBroker = (window.User && window.User.broker_config) || {};
+    const ibkrToken = document.getElementById('ibkr-flex-token').value.trim();
+    const ibkrQuery = document.getElementById('ibkr-flex-query').value.trim();
+    const broker_config = {
+      ...existingBroker,
+      ibkr: {
+        ...(existingBroker.ibkr || {}),
+        flex: (ibkrToken || ibkrQuery)
+          ? { token: ibkrToken, query_id: ibkrQuery }
+          : undefined,
+      },
+    };
+    // Drop empty subsections so the JSONB stays tidy
+    if (!broker_config.ibkr.flex) delete broker_config.ibkr.flex;
+    if (Object.keys(broker_config.ibkr).length === 0) delete broker_config.ibkr;
+
     const { error: saveErr } = await supabaseClient
       .from('profiles')
-      .update({ llm_keys: keys })
+      .update({ llm_keys: keys, broker_config })
       .eq('id', auth.user.id);
 
     setSubmitting(btn, false);
@@ -707,10 +747,17 @@ if (settingsForm) {
     succ.style.display = 'block';
     window.User = window.User || {};
     window.User.llm_keys = keys;
+    window.User.broker_config = broker_config;
     // Live-refresh the WF hub's agent chip so the user sees the new
     // selection without a page reload.
     if (typeof window.wfUpdateAgentLabel === 'function') {
       window.wfUpdateAgentLabel();
+    }
+    // If the user is on the PORT view, re-render it so newly-saved
+    // IBKR credentials kick off a fetch instead of leaving the setup
+    // prompt on screen.
+    if (typeof window.refreshPortfolioView === 'function') {
+      window.refreshPortfolioView();
     }
     setTimeout(closeSettingsModal, 1500);
   });

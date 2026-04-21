@@ -23,12 +23,15 @@ CREATE TABLE public.profiles (
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,    -- manual kill switch
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    llm_keys        JSONB DEFAULT '{}'
+    llm_keys        JSONB DEFAULT '{}',
+    broker_config   JSONB DEFAULT '{}'                -- per-user brokerage credentials (e.g. IBKR Flex)
 );
 
 COMMENT ON TABLE  public.profiles IS 'Public user profiles — one row per auth.users entry';
 COMMENT ON COLUMN public.profiles.subscription_tier IS 'Gate features by tier: free, pro, premium';
 COMMENT ON COLUMN public.profiles.is_active IS 'Set to FALSE to disable a user without deleting them';
+COMMENT ON COLUMN public.profiles.broker_config IS
+    'Read-only brokerage credentials, RLS-scoped. Shape: {"ibkr": {"flex": {"token": "...", "query_id": "..."}}}';
 
 
 -- ───────────────────────────────────────
@@ -350,5 +353,19 @@ FOR INSERT
 WITH CHECK (true);
 
 CREATE POLICY "Allow read access for authenticated users only" ON public.waitlist
-FOR SELECT 
+FOR SELECT
 USING (auth.role() = 'authenticated');
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- INCREMENTAL MIGRATIONS
+-- Run these on existing databases that were created from an
+-- earlier version of this file. Each block is idempotent via
+-- IF NOT EXISTS / DO $$ checks so re-running is safe.
+-- ═══════════════════════════════════════════════════════════════
+
+-- 2025-04 — Add broker_config JSONB to profiles for IBKR Flex (and
+-- future brokerage) read-only credentials. RLS on profiles already
+-- restricts reads to ``auth.uid() = id`` so no new policy is needed.
+ALTER TABLE public.profiles
+    ADD COLUMN IF NOT EXISTS broker_config JSONB DEFAULT '{}'::jsonb;

@@ -824,6 +824,126 @@ def wf_w(limit: int = 50) -> FunctionResult:
     )
 
 
+# ═══════════════════════════════════════════════════════════════════
+# PORT — Portfolio (Interactive Brokers via Flex Web Service)
+#
+# The IBKR Flex token + Query ID are per-user secrets stored in
+# ``profiles.broker_config.ibkr.flex`` (Supabase, RLS-scoped). The
+# frontend injects them into the workflow run's ``user_context`` so
+# they stay out of the LLM-visible params_schema — this tool reads
+# them via ``get_run_context()`` and never exposes them to the agent.
+# ═══════════════════════════════════════════════════════════════════
+
+@register_tool(
+    name="PORT",
+    description=(
+        "Portfolio — the user's current Interactive Brokers positions, "
+        "cash balances, and net asset value via the IBKR Flex Web "
+        "Service (read-only, EOD). Returns top positions by market "
+        "value with cost basis and unrealized P&L. Use when the user "
+        "asks about their portfolio, holdings, P&L, or exposure. "
+        "No parameters: credentials come from the run's user context."
+    ),
+    params_schema={
+        "limit": {
+            "type": "integer",
+            "description": "Max positions to include (default 25)",
+            "default": 25,
+        },
+    },
+    category="portfolio",
+    aliases=["PORTFOLIO", "HOLDINGS"],
+)
+def wf_port(limit: int = 25) -> FunctionResult:
+    ctx = get_run_context()
+    flex = (((ctx.get("broker_config") or {}).get("ibkr") or {}).get("flex") or {})
+    token = (flex.get("token") or "").strip()
+    query_id = (flex.get("query_id") or "").strip()
+
+    if not token or not query_id:
+        return FunctionResult(
+            data={"positions": [], "cash": [], "nav": [], "configured": False},
+            summary=(
+                "IBKR Flex is not configured. Ask the user to paste their "
+                "Flex token + Query ID in terminal Settings → Brokerage."
+            ),
+            widget={
+                "type": "portfolio",
+                "title": "Portfolio — IBKR not configured",
+                "configured": False,
+            },
+        )
+
+    from functions.ibkr import fetch_flex_snapshot, FlexError
+    try:
+        snapshot = fetch_flex_snapshot(token, query_id)
+    except FlexError as e:
+        return FunctionResult(
+            error=str(e),
+            summary=f"IBKR Flex fetch failed: {e}",
+        )
+
+    positions = snapshot.get("positions") or []
+    cash = snapshot.get("cash") or []
+    nav = snapshot.get("nav") or []
+    account = snapshot.get("account") or {}
+
+    lim = max(1, min(int(limit), 100))
+    top = positions[:lim]
+
+    # Totals — for the summary line
+    total_value = sum((p.get("value") or 0) for p in positions)
+    total_unreal = sum((p.get("unrealizedPnl") or 0) for p in positions)
+    base_cash = next(
+        (c.get("endingCash") for c in cash if c.get("currency") == "BASE_SUMMARY"),
+        None,
+    )
+
+    latest_nav = nav[-1].get("total") if nav else None
+    nav_str = f"NAV {latest_nav:,.0f}" if isinstance(latest_nav, (int, float)) else ""
+    cash_str = f"cash {base_cash:,.0f}" if isinstance(base_cash, (int, float)) else ""
+
+    top_names = ", ".join(
+        f"{p.get('symbol', '?')} ({(p.get('value') or 0):,.0f})" for p in top[:3]
+    )
+
+    summary = (
+        f"Portfolio ({account.get('id', 'IBKR')}) — "
+        f"{len(positions)} positions, value {total_value:,.0f}, "
+        f"unrealized P&L {total_unreal:+,.0f}. "
+        + (f"{nav_str}. " if nav_str else "")
+        + (f"{cash_str}. " if cash_str else "")
+        + (f"Top: {top_names}." if top_names else "")
+    )
+
+    return FunctionResult(
+        data={
+            "account": account,
+            "positions": top,
+            "cash": cash,
+            "nav": nav,
+            "totals": {
+                "value": total_value,
+                "unrealizedPnl": total_unreal,
+                "baseCash": base_cash,
+                "nav": latest_nav,
+            },
+            "asOf": snapshot.get("asOf"),
+        },
+        summary=summary,
+        widget={
+            "type": "portfolio",
+            "title": f"Portfolio — {account.get('id', 'IBKR')}",
+            "account": account,
+            "positions": top,
+            "cash": cash,
+            "nav": nav,
+            "asOf": snapshot.get("asOf"),
+            "configured": True,
+        },
+    )
+
+
 # Import side effect — make sure all @register_tool decorators run.
 def _ensure_registered():
     """No-op helper so callers can force-import this module."""

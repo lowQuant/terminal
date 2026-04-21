@@ -787,6 +787,11 @@ async function wfStartRun(workflowId, inputs, wfMeta, adHocSpec = null, mode = '
     display_name: window.auth?.user?.user_metadata?.display_name
       || window.auth?.user?.email
       || '',
+    // Brokerage credentials (read-only, e.g. IBKR Flex token + query ID).
+    // Forwarded to the backend via the same contextvar mechanism as the
+    // watchlist, so tools like PORT can fetch the user's positions
+    // without the credentials appearing as LLM-visible parameters.
+    broker_config: window.User?.broker_config || {},
   };
 
   wfInitStreamUI(wfMeta);

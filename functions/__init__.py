@@ -16,6 +16,7 @@ from functions.eco import eco_bp
 from functions.evts import evts_bp
 from functions.fa import fa_bp
 from functions.fx import fx_bp
+from functions.ibkr import ibkr_bp
 from functions.most import most_bp
 from functions.mov import mov_bp
 from functions.eqs import eqs_bp
@@ -54,6 +55,7 @@ ALL_BLUEPRINTS = [
     evts_bp,
     fa_bp,
     fx_bp,
+    ibkr_bp,
     most_bp,
     mov_bp,
     eqs_bp,
