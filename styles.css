@@ -6644,6 +6644,316 @@ body {
   margin-right: auto;
 }
 
+/* ── Param form (schema-driven step params) ── */
+.wf-step-row__desc {
+  font-size: 10px;
+  color: #c0c5ce;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.4;
+  padding: 4px 0 2px;
+}
+
+.wf-step-row__form {
+  background: #08080c;
+  border: 1px solid #222;
+  border-radius: 2px;
+  padding: 8px 10px;
+}
+
+.wf-param-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wf-param {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wf-param--empty {
+  color: #6a6f78;
+  font-size: 10px;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.wf-param__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-param__name {
+  color: #d4d4d4;
+  font-weight: 600;
+}
+
+.wf-param__req {
+  color: var(--orange, #ff8c00);
+}
+
+.wf-param__type {
+  color: #6a6f78;
+  font-size: 9px;
+  padding: 1px 4px;
+  background: #141419;
+  border: 1px solid #2a2a33;
+  border-radius: 2px;
+}
+
+.wf-param__default {
+  color: #6a6f78;
+  font-size: 9px;
+  margin-left: auto;
+}
+
+.wf-param__desc {
+  color: #8a8f98;
+  font-size: 10px;
+  line-height: 1.4;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  padding-top: 1px;
+}
+
+.wf-param__input,
+.wf-param__select {
+  background: #0a0a0f;
+  border: 1px solid #2a2a33;
+  color: #d4d4d4;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 5px 7px;
+  border-radius: 2px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.wf-param__input:focus,
+.wf-param__select:focus {
+  outline: none;
+  border-color: var(--orange, #ff8c00);
+}
+.wf-param__input--missing {
+  border-color: #b5483c;
+}
+
+.wf-param-advanced {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #222;
+}
+.wf-param-advanced > summary {
+  cursor: pointer;
+  font-size: 10px;
+  color: #6a6f78;
+  font-family: 'JetBrains Mono', monospace;
+  user-select: none;
+  padding: 2px 0;
+}
+.wf-param-advanced > summary:hover {
+  color: #c0c5ce;
+}
+.wf-param-advanced__input {
+  width: 100%;
+  min-height: 60px;
+  background: #0a0a0f;
+  border: 1px solid #2a2a33;
+  color: #d4d4d4;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 6px 8px;
+  margin-top: 6px;
+  border-radius: 2px;
+  box-sizing: border-box;
+  resize: vertical;
+}
+.wf-param-advanced__input:focus {
+  outline: none;
+  border-color: var(--orange, #ff8c00);
+}
+
+/* ── Builder assistant panel (Phase B) ── */
+.wf-builder__asst {
+  background: #0c0c12;
+  border: 1px solid #2a2a33;
+  border-left: 2px solid var(--orange, #ff8c00);
+  border-radius: 3px;
+  margin-bottom: 20px;
+}
+.wf-builder__asst > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #d4d4d4;
+  font-weight: 600;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.wf-builder__asst > summary:hover {
+  background: #141419;
+}
+.wf-builder__asst[open] > summary {
+  border-bottom: 1px solid #222;
+}
+.wf-builder__asst-hint {
+  color: #6a6f78;
+  font-weight: normal;
+  font-size: 10px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.wf-asst {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wf-asst__log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.wf-asst__msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.wf-asst__msg--user {
+  background: #141419;
+  border-left: 2px solid #3a3a44;
+  align-self: flex-end;
+  max-width: 88%;
+}
+.wf-asst__msg--asst {
+  background: #0a0a0f;
+  border-left: 2px solid var(--orange, #ff8c00);
+  max-width: 95%;
+}
+
+.wf-asst__text {
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.wf-asst__pending {
+  color: #6a6f78;
+  letter-spacing: 0.2em;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-asst__proposal {
+  background: #141419;
+  border: 1px solid #2a2a33;
+  border-radius: 2px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.wf-asst__proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wf-asst__proposal-tool {
+  color: var(--orange, #ff8c00);
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.wf-asst__proposal-label {
+  color: #c0c5ce;
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.wf-asst__proposal-why {
+  color: #8a8f98;
+  font-size: 10px;
+  font-style: italic;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.wf-asst__params {
+  background: #08080c;
+  border: 1px solid #222;
+  border-radius: 2px;
+  padding: 6px 8px;
+  margin: 0;
+  font-size: 10px;
+  color: #d4d4d4;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.wf-asst__params--empty {
+  color: #6a6f78;
+  font-style: italic;
+  padding: 4px 8px;
+}
+
+.wf-asst__proposal-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.wf-asst__done {
+  padding: 8px 10px;
+  background: #101c14;
+  border: 1px solid #2a4d35;
+  border-radius: 2px;
+  color: #8fd4a0;
+  font-size: 11px;
+}
+
+.wf-asst__input-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.wf-asst__input {
+  flex: 1;
+  background: #0a0a0f;
+  border: 1px solid #2a2a33;
+  color: #d4d4d4;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 2px;
+  resize: vertical;
+  min-height: 50px;
+  box-sizing: border-box;
+}
+.wf-asst__input:focus {
+  outline: none;
+  border-color: var(--orange, #ff8c00);
+}
+
+.wf-btn--small {
+  padding: 4px 10px;
+  font-size: 10px;
+}
+
 /* ── Workflow card buttons (edit / delete) ── */
 .wf-card {
   position: relative;

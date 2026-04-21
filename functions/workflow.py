@@ -29,7 +29,7 @@ from functions._workflow import (
     list_tools,
     load_workflows_from_dir,
 )
-from functions._agent import nl_to_workflow, run_workflow
+from functions._agent import nl_to_workflow, run_workflow, wf_assistant_turn
 # Import tool adapters so @register_tool decorators execute
 from functions import _wf_tools  # noqa: F401
 
@@ -417,6 +417,34 @@ def start_run():
         "events": collector.events,
         "done": True,
     })
+
+
+@wf_bp.route("/api/wf/assist", methods=["POST"])
+def wf_assist():
+    """One turn of the workflow-builder chat assistant.
+
+    Body::
+
+        {
+            "messages":         [{"role": "user"|"assistant", "content": str}, ...],
+            "current_workflow": {"name", "description", "focus", "steps": [...]},
+            "llm_keys":         {...}
+        }
+
+    Returns the structured turn result from ``wf_assistant_turn`` so
+    the frontend can render the chat message and optionally insert a
+    proposed step into the builder.
+    """
+    body = request.get_json(silent=True) or {}
+    messages = body.get("messages") or []
+    current_workflow = body.get("current_workflow") or {}
+    llm_keys = body.get("llm_keys") or {}
+
+    if not isinstance(messages, list):
+        return jsonify({"error": "messages must be a list"}), 400
+
+    result = wf_assistant_turn(messages, current_workflow, llm_keys)
+    return jsonify(result)
 
 
 @wf_bp.route("/api/wf/nl", methods=["POST"])

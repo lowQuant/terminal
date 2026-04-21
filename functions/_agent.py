@@ -727,6 +727,230 @@ def run_workflow(
 # Natural language → workflow (bonus, best effort)
 # ═══════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════
+# Workflow builder assistant — conversational step-at-a-time compiler
+#
+# The one-shot ``nl_to_workflow`` below produces a full spec in a
+# single call, which is fine for simple requests but breaks down
+# when the user doesn't know the tool catalog or their request is
+# ambiguous. This function runs a single *turn* of a conversation:
+# the caller maintains the message history and the current workflow
+# state (name/focus/steps so far), we ask the LLM to either propose
+# one next step, ask a clarifying question, or declare the workflow
+# complete. The frontend renders the reply inline and exposes an
+# "Add step" button when we propose one.
+# ═══════════════════════════════════════════════════════════════════
+
+def wf_assistant_turn(
+    messages: List[Dict[str, str]],
+    current_workflow: Dict[str, Any],
+    llm_keys: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Run one turn of the workflow-builder chat.
+
+    ``messages`` is the conversation so far — list of
+    ``{"role": "user"|"assistant", "content": "..."}``.
+    ``current_workflow`` mirrors the builder state —
+    ``{"name", "description", "focus", "steps": [{"tool", "params",
+    "label"}, ...]}``.
+
+    Returns::
+
+        {
+            "reply":         "short message to show in chat",
+            "action":        "propose_step" | "ask" | "done",
+            "step":          {"tool", "params", "label", "rationale"} | None,
+            "workflow_meta": {"name", "description", "focus"} | None,
+        }
+
+    Falls back to an ``ask`` response with an error message when the
+    LLM is unavailable or returns unparseable output, so the UI stays
+    functional without silent failures.
+    """
+    import json
+
+    is_available, model, api_key, provider = _get_agent_config(llm_keys)
+    if not is_available:
+        return {
+            "reply": (
+                "No LLM configured. Add an API key for Anthropic / OpenAI / "
+                "Gemini / Perplexity / OpenRouter in **Settings** to use "
+                "the builder assistant."
+            ),
+            "action": "ask",
+            "step": None,
+            "workflow_meta": None,
+        }
+
+    # Compact tool catalog for the prompt — name, description, params
+    # with their types/enums/requirements.
+    catalog_lines = []
+    for spec in TOOL_REGISTRY.values():
+        params = spec.params_schema or {}
+        param_bits = []
+        for k, v in params.items():
+            if not isinstance(v, dict):
+                param_bits.append(k)
+                continue
+            bits = [k]
+            if v.get("required"):
+                bits[0] += "*"
+            if v.get("type"):
+                bits.append(f":{v['type']}")
+            if v.get("enum"):
+                bits.append("(" + "|".join(str(e) for e in v["enum"]) + ")")
+            if v.get("default") not in (None, ""):
+                bits.append(f"={json.dumps(v['default'])}")
+            param_bits.append("".join(bits))
+        catalog_lines.append(
+            f"- {spec.name}: {spec.description}\n"
+            f"    params: {', '.join(param_bits) or '(none)'}"
+        )
+    catalog = "\n".join(catalog_lines)
+
+    # Compact current-workflow snapshot so the assistant doesn't
+    # re-propose the same step twice.
+    wf_snapshot = {
+        "name": current_workflow.get("name", ""),
+        "description": current_workflow.get("description", ""),
+        "focus": current_workflow.get("focus", ""),
+        "existing_steps": [
+            {
+                "tool": s.get("tool"),
+                "label": s.get("label", ""),
+                "params": s.get("params", {}),
+            }
+            for s in (current_workflow.get("steps") or [])
+        ],
+    }
+
+    system = (
+        "You are a workflow-building assistant embedded in a Bloomberg-style "
+        "market terminal. The user is constructing a 'workflow' — an ordered "
+        "chain of tool calls the terminal runs against market data. Your job "
+        "is to collaborate one step at a time: propose a single next tool "
+        "call with filled-in parameters, ask a clarifying question, or declare "
+        "the workflow complete. Be terse. No fluff.\n\n"
+        "Respond with a JSON object matching this schema — and NOTHING else "
+        "(no prose, no markdown fences):\n"
+        "{\n"
+        '  "reply":         "<short message to the user>",\n'
+        '  "action":        "propose_step" | "ask" | "done",\n'
+        '  "step":          {"tool": "<TOOL>", "params": {...}, "label": "<short label>", "rationale": "<1 line why>"} | null,\n'
+        '  "workflow_meta": {"name": "...", "description": "...", "focus": "..."} | null\n'
+        "}\n\n"
+        "Rules:\n"
+        "- Use ONLY tools from the catalog below. Don't invent tool names.\n"
+        "- 'action=propose_step' → step must be present with a valid tool and "
+        "  every required param filled in.\n"
+        "- Param names and values must match the tool's schema (respect enums, "
+        "  types, and required flags).\n"
+        "- If existing_steps is empty and the workflow has no name/focus, set "
+        "  workflow_meta with sensible values derived from the user's request.\n"
+        "- On later turns you can update workflow_meta only if the user explicitly "
+        "  asks to rename or re-focus; otherwise leave it null.\n"
+        "- Use 'action=ask' when the request is ambiguous (e.g. country, "
+        "  time period, which ticker).\n"
+        "- Use 'action=done' when the workflow covers the user's goal — "
+        "  suggest they hit 'Save & run'.\n"
+        "- Params can reference prior steps via `{{steps.<step_id>.data.<path>}}` "
+        "  or workflow inputs via `{{inputs.<name>}}`. Only use these when the "
+        "  data dependency is real.\n\n"
+        f"Tool catalog:\n{catalog}\n\n"
+        f"Current workflow state:\n{json.dumps(wf_snapshot, indent=2)}"
+    )
+
+    # Keep the conversation manageable. If the history is long, only
+    # send the last ~10 turns — the system prompt already encodes the
+    # current workflow state so older turns are mostly redundant.
+    trimmed = messages[-10:]
+    chat: List[Dict[str, Any]] = [{"role": "system", "content": system}]
+    for m in trimmed:
+        role = m.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        chat.append({"role": role, "content": m.get("content", "")})
+
+    try:
+        resp = _llm_completion(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            messages=chat,
+            max_tokens=800,
+        )
+    except Exception as e:  # noqa: BLE001
+        return {
+            "reply": f"LLM call failed: {e}",
+            "action": "ask",
+            "step": None,
+            "workflow_meta": None,
+        }
+
+    raw = (resp.get("content") or "").strip()
+    # Strip common markdown-fence wrappers some models add despite
+    # instructions.
+    if raw.startswith("```"):
+        raw = raw.strip("`").strip()
+        if raw.lower().startswith("json"):
+            raw = raw[4:].strip()
+    # Some models wrap JSON in extra text — try to find the first { ... }
+    if not raw.startswith("{"):
+        first = raw.find("{")
+        last = raw.rfind("}")
+        if first != -1 and last > first:
+            raw = raw[first:last + 1]
+
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {
+            "reply": raw[:500] if raw else "The model returned an empty response. Try rephrasing.",
+            "action": "ask",
+            "step": None,
+            "workflow_meta": None,
+        }
+
+    # Normalize / validate the response shape
+    action = parsed.get("action", "ask")
+    if action not in ("propose_step", "ask", "done"):
+        action = "ask"
+
+    step = parsed.get("step")
+    if action == "propose_step":
+        if not isinstance(step, dict) or not step.get("tool"):
+            action = "ask"
+            step = None
+        elif step["tool"] not in TOOL_REGISTRY:
+            return {
+                "reply": (
+                    f"I tried to suggest `{step['tool']}` but that tool doesn't "
+                    f"exist in the catalog. Let me know what you want to do and "
+                    f"I'll pick a real one."
+                ),
+                "action": "ask",
+                "step": None,
+                "workflow_meta": None,
+            }
+        else:
+            step.setdefault("params", {})
+            step.setdefault("label", step["tool"])
+            step.setdefault("rationale", "")
+    else:
+        step = None
+
+    workflow_meta = parsed.get("workflow_meta")
+    if workflow_meta is not None and not isinstance(workflow_meta, dict):
+        workflow_meta = None
+
+    return {
+        "reply": parsed.get("reply") or "",
+        "action": action,
+        "step": step,
+        "workflow_meta": workflow_meta,
+    }
+
+
 def nl_to_workflow(text: str, llm_keys: Optional[Dict[str, str]] = None) -> Optional[Workflow]:
     """Ask an LLM to turn a natural-language request into a workflow spec."""
     is_available, model, api_key, provider = _get_agent_config(llm_keys)

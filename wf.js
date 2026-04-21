@@ -58,6 +58,177 @@ function wfSaveLayout() {
   } catch { /* ignore */ }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Param form — schema-driven editor for each step's params
+//
+// Replaces the raw JSON textarea with one input per parameter, with
+// the param description / type / default shown inline so users don't
+// need to guess what the function expects. The form plus an "Advanced"
+// raw-JSON escape hatch (for {{templates}} in non-string fields or
+// extra keys the schema doesn't know about) together round-trip into
+// ``editable.steps[i].params`` as a JSON string, so the rest of the
+// builder's save/run path stays unchanged.
+// ═══════════════════════════════════════════════════════════════════
+
+function wfParamKind(spec) {
+  if (!spec || typeof spec !== 'object') return 'string';
+  if (Array.isArray(spec.enum) && spec.enum.length) return 'enum';
+  if (spec.type === 'boolean') return 'boolean';
+  if (spec.type === 'integer' || spec.type === 'number') return 'number';
+  return 'string';
+}
+
+function wfCoerceParamValue(kind, raw) {
+  if (raw === '' || raw == null) return undefined;  // empty → use tool default
+  const s = String(raw);
+  // Templates pass through unchanged — the backend resolves them.
+  if (/\{\{[^}]+\}\}/.test(s)) return s;
+  if (kind === 'boolean') return s === 'true';
+  if (kind === 'number') {
+    const n = Number(s);
+    return Number.isFinite(n) ? n : s;
+  }
+  return s;
+}
+
+function wfRenderParamForm(tool, paramsObj) {
+  const schema = (tool && tool.params) || {};
+  const keys = Object.keys(schema);
+
+  const extras = {};
+  if (paramsObj && typeof paramsObj === 'object') {
+    for (const k of Object.keys(paramsObj)) {
+      if (!(k in schema)) extras[k] = paramsObj[k];
+    }
+  }
+  const advancedJSON = Object.keys(extras).length
+    ? JSON.stringify(extras, null, 2)
+    : '';
+
+  if (!keys.length) {
+    // No schema → fall back entirely to raw JSON editing so power
+    // users can still pass through arbitrary params.
+    const raw = paramsObj ? JSON.stringify(paramsObj, null, 2) : '';
+    return `
+      <div class="wf-param wf-param--empty">This tool takes no declared parameters.</div>
+      <details class="wf-param-advanced" ${raw ? 'open' : ''}>
+        <summary>Advanced · raw JSON</summary>
+        <textarea class="wf-param-advanced__input" placeholder='{}'>${escHtml(raw)}</textarea>
+      </details>
+    `;
+  }
+
+  const fieldsHTML = keys.map((key) => {
+    const spec = schema[key] || {};
+    const kind = wfParamKind(spec);
+    const current = paramsObj && Object.prototype.hasOwnProperty.call(paramsObj, key)
+      ? paramsObj[key] : undefined;
+    const reqMark = spec.required ? '<span class="wf-param__req">*</span>' : '';
+    const desc = spec.description
+      ? `<div class="wf-param__desc">${escHtml(spec.description)}</div>` : '';
+    const typeTag = spec.type
+      ? `<span class="wf-param__type">${escHtml(spec.type)}</span>` : '';
+    const defaultHint = (spec.default !== undefined && spec.default !== '')
+      ? `<span class="wf-param__default">default: ${escHtml(JSON.stringify(spec.default))}</span>`
+      : '';
+
+    let control = '';
+    if (kind === 'enum') {
+      const opts = spec.enum.map((v) => {
+        const val = String(v);
+        const selected = current != null && String(current) === val ? 'selected' : '';
+        return `<option value="${escHtml(val)}" ${selected}>${escHtml(val)}</option>`;
+      }).join('');
+      const unsetSel = current == null ? 'selected' : '';
+      control = `
+        <select class="wf-param__select" data-param="${escHtml(key)}" data-kind="enum">
+          <option value="" ${unsetSel}>(use default)</option>
+          ${opts}
+        </select>`;
+    } else if (kind === 'boolean') {
+      const unsetSel = current == null ? 'selected' : '';
+      const trueSel  = current === true ? 'selected' : '';
+      const falseSel = current === false ? 'selected' : '';
+      control = `
+        <select class="wf-param__select" data-param="${escHtml(key)}" data-kind="boolean">
+          <option value="" ${unsetSel}>(use default)</option>
+          <option value="true" ${trueSel}>true</option>
+          <option value="false" ${falseSel}>false</option>
+        </select>`;
+    } else {
+      // number / string → text input so {{templates}} work everywhere
+      const displayVal = current == null
+        ? ''
+        : (typeof current === 'object' ? JSON.stringify(current) : String(current));
+      const placeholder = (spec.default !== undefined && spec.default !== '')
+        ? String(spec.default) : (kind === 'number' ? '0' : '');
+      control = `
+        <input type="text" class="wf-param__input"
+               data-param="${escHtml(key)}" data-kind="${kind}"
+               value="${escHtml(displayVal)}" placeholder="${escHtml(placeholder)}" />`;
+    }
+
+    return `
+      <div class="wf-param">
+        <label class="wf-param__label">
+          <span class="wf-param__name">${escHtml(key)}${reqMark}</span>
+          ${typeTag}${defaultHint}
+        </label>
+        ${control}
+        ${desc}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="wf-param-form">${fieldsHTML}</div>
+    <details class="wf-param-advanced" ${advancedJSON ? 'open' : ''}>
+      <summary>Advanced · raw JSON (for templates in non-string params or extra keys)</summary>
+      <textarea class="wf-param-advanced__input" placeholder='{"extra": "value"}'>${escHtml(advancedJSON)}</textarea>
+    </details>`;
+}
+
+function wfCollectParamsFromRow(rowEl, tool) {
+  const schema = (tool && tool.params) || {};
+  const out = {};
+
+  rowEl.querySelectorAll('[data-param]').forEach((el) => {
+    const key = el.dataset.param;
+    const kind = el.dataset.kind;
+    const coerced = wfCoerceParamValue(kind, el.value);
+    if (coerced !== undefined) out[key] = coerced;
+  });
+
+  const adv = rowEl.querySelector('.wf-param-advanced__input');
+  if (adv && adv.value.trim()) {
+    try {
+      const parsed = JSON.parse(adv.value);
+      if (parsed && typeof parsed === 'object') {
+        // Advanced JSON wins on conflicts (lets users override a
+        // form value with a template they'd rather keep in JSON).
+        Object.assign(out, parsed);
+      }
+    } catch {
+      /* leave Advanced JSON errors to surface on save */
+    }
+  }
+
+  // Mirror required-field warnings via a data attribute on the row.
+  // We don't block anything — the backend validates — but this lets
+  // the user see at a glance which required fields are still blank.
+  Object.keys(schema).forEach((key) => {
+    const el = rowEl.querySelector(`[data-param="${CSS.escape(key)}"]`);
+    if (!el) return;
+    const spec = schema[key];
+    if (spec && spec.required && (out[key] === undefined || out[key] === '')) {
+      el.classList.add('wf-param__input--missing');
+    } else {
+      el.classList.remove('wf-param__input--missing');
+    }
+  });
+
+  return out;
+}
+
 // ── html2canvas loader (CDN, lazy) ──
 function wfLoadHtml2Canvas() {
   if (window.html2canvas) return Promise.resolve(window.html2canvas);
@@ -539,6 +710,18 @@ function wfShowBuilder(existing) {
                   placeholder="e.g. Rank names where implied move looks rich vs realized vol">${escHtml(spec.focus || '')}</textarea>
       </div>
 
+      <details class="wf-builder__asst" id="wb-asst" ${existing ? '' : 'open'}>
+        <summary>🤖 Build with assistant <span class="wf-builder__asst-hint">describe what you want, I'll suggest tools step by step</span></summary>
+        <div class="wf-asst">
+          <div class="wf-asst__log" id="wb-asst-log"></div>
+          <div class="wf-asst__input-row">
+            <textarea id="wb-asst-input" class="wf-asst__input" rows="2"
+                      placeholder="e.g. Find US names reporting next week with rich IV vs realized, then check their news"></textarea>
+            <button class="wf-btn wf-btn--primary" id="wb-asst-send" type="button">Send</button>
+          </div>
+        </div>
+      </details>
+
       <div class="wf-builder__section">
         <label class="wf-builder__label">Steps</label>
         <div class="wf-builder__steps" id="wb-steps"></div>
@@ -578,63 +761,63 @@ function wfShowBuilder(existing) {
   };
 
   function renderSteps() {
-    stepsHost.innerHTML = editable.steps.map((s, i) => `
-      <div class="wf-step-row" data-idx="${i}">
-        <div class="wf-step-row__idx">${i + 1}</div>
-        <select class="wf-step-row__tool" data-field="tool">
-          ${WF.tools.map((t) => `
-            <option value="${escHtml(t.name)}" ${t.name === s.tool ? 'selected' : ''}>
-              ${escHtml(t.name)}
-            </option>
-          `).join('')}
-        </select>
-        <div class="wf-step-row__body">
-          <input class="wf-step-row__label-input" data-field="label"
-                 value="${escHtml(s.label)}" placeholder="Label (what this step is for)" />
-          <textarea class="wf-step-row__params-input" data-field="params"
-                    rows="1" placeholder='{"country":"US","limit":10}'>${escHtml(s.params)}</textarea>
-          <div class="wf-step-row__hint" data-hint="${escHtml(s.tool)}"></div>
-        </div>
-        <button class="wf-step-row__remove" data-action="remove" title="Remove step">✕</button>
-      </div>
-    `).join('');
+    stepsHost.innerHTML = editable.steps.map((s, i) => {
+      const tool = WF.tools.find((t) => t.name === s.tool) || { params: {} };
+      let parsedParams = {};
+      try { parsedParams = s.params ? JSON.parse(s.params) : {}; } catch { /* keep {} */ }
+      const toolDesc = tool.description
+        ? `<div class="wf-step-row__desc">${escHtml(tool.description)}</div>` : '';
+      return `
+        <div class="wf-step-row" data-idx="${i}">
+          <div class="wf-step-row__idx">${i + 1}</div>
+          <select class="wf-step-row__tool" data-field="tool">
+            ${WF.tools.map((t) => `
+              <option value="${escHtml(t.name)}" ${t.name === s.tool ? 'selected' : ''}>
+                ${escHtml(t.name)}
+              </option>`).join('')}
+          </select>
+          <div class="wf-step-row__body">
+            <input class="wf-step-row__label-input" data-field="label"
+                   value="${escHtml(s.label)}" placeholder="Label (what this step is for)" />
+            ${toolDesc}
+            <div class="wf-step-row__form">${wfRenderParamForm(tool, parsedParams)}</div>
+          </div>
+          <button class="wf-step-row__remove" data-action="remove" title="Remove step">✕</button>
+        </div>`;
+    }).join('');
 
-    // Populate per-row hints from the tool registry.
-    // We show the FULL description (wrapped) plus a compact param
-    // line so the user understands what each tool does without
-    // bouncing back to docs.
     stepsHost.querySelectorAll('.wf-step-row').forEach((row) => {
       const idx = +row.dataset.idx;
       const step = editable.steps[idx];
-      const hint = row.querySelector('[data-hint]');
       const tool = WF.tools.find((t) => t.name === step.tool);
-      if (hint && tool) {
-        const paramHint = Object.entries(tool.params || {})
-          .map(([k, v]) => {
-            const req = v.required ? '*' : '';
-            const type = v.type ? `:${v.type}` : '';
-            const dflt = (v.default !== undefined && v.default !== '') ? `=${JSON.stringify(v.default)}` : '';
-            const enums = v.enum ? ` (${v.enum.join('|')})` : '';
-            return `${k}${req}${type}${dflt}${enums}`;
-          })
-          .join(', ') || '(no params)';
-        hint.innerHTML = `
-          <div class="wf-step-row__desc">${escHtml(tool.description || '')}</div>
-          <div class="wf-step-row__params">params: ${escHtml(paramHint)}</div>
-        `;
-      }
 
-      // Wire up per-row inputs to the editable state
+      // Changing the tool swaps in a new param schema — wipe params
+      // and re-render the form so the new fields appear.
       row.querySelector('[data-field="tool"]').addEventListener('change', (e) => {
         editable.steps[idx].tool = e.target.value;
-        renderSteps();  // re-render to refresh hint
+        editable.steps[idx].params = '{}';
+        renderSteps();
       });
+
       row.querySelector('[data-field="label"]').addEventListener('input', (e) => {
         editable.steps[idx].label = e.target.value;
       });
-      row.querySelector('[data-field="params"]').addEventListener('input', (e) => {
-        editable.steps[idx].params = e.target.value;
+
+      // Any param input change → re-collect the whole form into a
+      // JSON string so the save/run path (which JSON.parses it) sees
+      // a fresh snapshot.
+      const syncParams = () => {
+        const params = wfCollectParamsFromRow(row, tool);
+        editable.steps[idx].params = JSON.stringify(params);
+      };
+      row.querySelectorAll('[data-param], .wf-param-advanced__input').forEach((el) => {
+        el.addEventListener('input', syncParams);
+        el.addEventListener('change', syncParams);
       });
+      // Run once after render so the missing-required markers paint
+      // immediately, not only after the user touches an input.
+      syncParams();
+
       row.querySelector('[data-action="remove"]').addEventListener('click', () => {
         if (editable.steps.length === 1) {
           showToast('At least one step is required');
@@ -646,6 +829,169 @@ function wfShowBuilder(existing) {
     });
   }
   renderSteps();
+
+  // ── Assistant panel (Phase B) ───────────────────────────────────
+  //
+  // One-turn-at-a-time conversational builder. The user describes
+  // what they're trying to analyze; the backend returns either a
+  // proposed step, a clarifying question, or a "done" signal. We
+  // render each turn inline and let the user click "Add step" to
+  // append the proposal to the builder.
+  const asstMessages = [];  // {role, content, _proposal?, _pending?}
+
+  function renderAsstLog() {
+    const log = document.getElementById('wb-asst-log');
+    if (!log) return;
+    log.innerHTML = asstMessages.map((m, idx) => {
+      const cls = m.role === 'user' ? 'wf-asst__msg--user' : 'wf-asst__msg--asst';
+      const content = m._pending
+        ? '<span class="wf-asst__pending">…</span>'
+        : escHtml(m.content || '');
+      let proposalHTML = '';
+      if (m._proposal && m._proposal.action === 'propose_step' && m._proposal.step) {
+        const step = m._proposal.step;
+        const paramsStr = step.params && Object.keys(step.params).length
+          ? `<pre class="wf-asst__params">${escHtml(JSON.stringify(step.params, null, 2))}</pre>`
+          : '<div class="wf-asst__params wf-asst__params--empty">(no params)</div>';
+        proposalHTML = `
+          <div class="wf-asst__proposal">
+            <div class="wf-asst__proposal-head">
+              <span class="wf-asst__proposal-tool">${escHtml(step.tool)}</span>
+              <span class="wf-asst__proposal-label">${escHtml(step.label || '')}</span>
+            </div>
+            ${step.rationale ? `<div class="wf-asst__proposal-why">${escHtml(step.rationale)}</div>` : ''}
+            ${paramsStr}
+            <div class="wf-asst__proposal-actions">
+              <button class="wf-btn wf-btn--primary wf-btn--small" data-asst-add="${idx}">+ Add step</button>
+              <button class="wf-btn wf-btn--secondary wf-btn--small" data-asst-skip="${idx}">Skip</button>
+            </div>
+          </div>`;
+      }
+      if (m._proposal && m._proposal.action === 'done') {
+        proposalHTML = `<div class="wf-asst__done">Workflow looks complete — try <strong>▶ Save &amp; run</strong>.</div>`;
+      }
+      return `
+        <div class="wf-asst__msg ${cls}">
+          ${content ? `<div class="wf-asst__text">${content}</div>` : ''}
+          ${proposalHTML}
+        </div>`;
+    }).join('');
+    log.scrollTop = log.scrollHeight;
+
+    // Wire proposal action buttons
+    log.querySelectorAll('[data-asst-add]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idx = +btn.dataset.asstAdd;
+        const proposal = asstMessages[idx] && asstMessages[idx]._proposal;
+        if (proposal && proposal.step) asstApplyStep(proposal.step);
+        if (proposal && proposal.workflow_meta) asstApplyMeta(proposal.workflow_meta);
+        btn.disabled = true;
+        btn.textContent = '✓ Added';
+      });
+    });
+    log.querySelectorAll('[data-asst-skip]').forEach((btn) => {
+      btn.addEventListener('click', () => { btn.closest('.wf-asst__msg').style.opacity = '0.5'; btn.disabled = true; });
+    });
+  }
+
+  function asstApplyStep(step) {
+    const nextIdx = editable.steps.length + 1;
+    editable.steps.push({
+      id: `step${nextIdx}`,
+      tool: step.tool,
+      label: step.label || step.tool,
+      params: JSON.stringify(step.params || {}),
+    });
+    renderSteps();
+  }
+
+  function asstApplyMeta(meta) {
+    if (!meta) return;
+    if (meta.name) {
+      const el = document.getElementById('wb-name');
+      if (el && !el.value.trim()) el.value = meta.name;
+    }
+    if (meta.description) {
+      const el = document.getElementById('wb-desc');
+      if (el && !el.value.trim()) el.value = meta.description;
+    }
+    if (meta.focus) {
+      const el = document.getElementById('wb-focus');
+      if (el && !el.value.trim()) el.value = meta.focus;
+    }
+  }
+
+  async function asstSend() {
+    const inputEl = document.getElementById('wb-asst-input');
+    if (!inputEl) return;
+    const text = inputEl.value.trim();
+    if (!text) return;
+
+    asstMessages.push({ role: 'user', content: text });
+    inputEl.value = '';
+    asstMessages.push({ role: 'assistant', content: '', _pending: true });
+    renderAsstLog();
+
+    // Build the request snapshot from the CURRENT form state so the
+    // assistant sees any edits the user made between turns.
+    const currentWorkflow = {
+      name: document.getElementById('wb-name').value,
+      description: document.getElementById('wb-desc').value,
+      focus: document.getElementById('wb-focus').value,
+      steps: editable.steps.map((s) => {
+        let params = {};
+        try { params = s.params ? JSON.parse(s.params) : {}; } catch { /* ignore */ }
+        return { tool: s.tool, label: s.label, params };
+      }),
+    };
+
+    try {
+      const res = await fetch('/api/wf/assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: asstMessages.filter((m) => !m._pending)
+            .map((m) => ({ role: m.role, content: m.content })),
+          current_workflow: currentWorkflow,
+          llm_keys: window.User?.llm_keys || {},
+        }),
+      });
+      const data = await res.json();
+      // Drop the pending placeholder
+      asstMessages.pop();
+      asstMessages.push({
+        role: 'assistant',
+        content: data.reply || '',
+        _proposal: data,
+      });
+      renderAsstLog();
+    } catch (err) {
+      asstMessages.pop();
+      asstMessages.push({ role: 'assistant', content: `Error: ${err.message || err}` });
+      renderAsstLog();
+    }
+  }
+
+  document.getElementById('wb-asst-send')?.addEventListener('click', asstSend);
+  document.getElementById('wb-asst-input')?.addEventListener('keydown', (e) => {
+    // Cmd/Ctrl-Enter sends without requiring a mouse trip.
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      asstSend();
+    }
+  });
+
+  // Greeting on open — only when the panel starts open (new workflow).
+  if (!existing) {
+    asstMessages.push({
+      role: 'assistant',
+      content:
+        "Tell me what you want to analyze — e.g. 'screen US small caps with "
+        + "earnings next week' or 'pull my portfolio and news on my biggest "
+        + "positions'. I'll suggest one tool at a time; hit + Add step to accept.",
+    });
+    renderAsstLog();
+  }
 
   document.getElementById('wb-add-step').addEventListener('click', () => {
     const nextIdx = editable.steps.length + 1;
