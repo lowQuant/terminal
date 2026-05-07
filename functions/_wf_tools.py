@@ -891,26 +891,38 @@ def wf_port(limit: int = 25) -> FunctionResult:
     lim = max(1, min(int(limit), 100))
     top = positions[:lim]
 
-    # Totals — for the summary line
-    total_value = sum((p.get("value") or 0) for p in positions)
-    total_unreal = sum((p.get("unrealizedPnl") or 0) for p in positions)
+    # Aggregate in base currency — summing local-currency values across
+    # positions in different currencies produces a meaningless total.
+    # The parser populates *InBase fields for every position; fall back
+    # to local-currency values only when InBase is missing (single-
+    # currency account or older queries without fxRateToBase).
+    def _base(p, base_key, local_key):
+        v = p.get(base_key)
+        return v if v is not None else (p.get(local_key) or 0)
+
+    total_value = sum(_base(p, "valueInBase", "value") for p in positions)
+    total_unreal = sum(
+        _base(p, "unrealizedPnlInBase", "unrealizedPnl") for p in positions
+    )
+    base_ccy = account.get("baseCurrency") or "USD"
     base_cash = next(
         (c.get("endingCash") for c in cash if c.get("currency") == "BASE_SUMMARY"),
         None,
     )
 
     latest_nav = nav[-1].get("total") if nav else None
-    nav_str = f"NAV {latest_nav:,.0f}" if isinstance(latest_nav, (int, float)) else ""
-    cash_str = f"cash {base_cash:,.0f}" if isinstance(base_cash, (int, float)) else ""
+    nav_str = f"NAV {latest_nav:,.0f} {base_ccy}" if isinstance(latest_nav, (int, float)) else ""
+    cash_str = f"cash {base_cash:,.0f} {base_ccy}" if isinstance(base_cash, (int, float)) else ""
 
     top_names = ", ".join(
-        f"{p.get('symbol', '?')} ({(p.get('value') or 0):,.0f})" for p in top[:3]
+        f"{p.get('symbol', '?')} ({_base(p, 'valueInBase', 'value'):,.0f})"
+        for p in top[:3]
     )
 
     summary = (
         f"Portfolio ({account.get('id', 'IBKR')}) — "
-        f"{len(positions)} positions, value {total_value:,.0f}, "
-        f"unrealized P&L {total_unreal:+,.0f}. "
+        f"{len(positions)} positions, value {total_value:,.0f} {base_ccy}, "
+        f"unrealized P&L {total_unreal:+,.0f} {base_ccy}. "
         + (f"{nav_str}. " if nav_str else "")
         + (f"{cash_str}. " if cash_str else "")
         + (f"Top: {top_names}." if top_names else "")
@@ -926,6 +938,7 @@ def wf_port(limit: int = 25) -> FunctionResult:
                 "value": total_value,
                 "unrealizedPnl": total_unreal,
                 "baseCash": base_cash,
+                "baseCurrency": base_ccy,
                 "nav": latest_nav,
             },
             "asOf": snapshot.get("asOf"),
