@@ -268,12 +268,33 @@ def _parse_statement(xml_text: str) -> Dict[str, Any]:
     cash = _parse_cash(root)
     nav = _parse_nav(root)
 
+    # Base currency lives on EquitySummaryByReportDateInBase rows. The
+    # frontend uses it to format every monetary column; without it, the
+    # PORT view falls back to USD which silently mis-labels EUR / GBP /
+    # CHF accounts. Fall back to USD only when NAV is genuinely empty.
+    base_ccy = "USD"
+    for row in nav:
+        ccy = (row.get("currency") or "").strip()
+        if ccy and ccy != "BASE":
+            base_ccy = ccy
+            break
+    account["baseCurrency"] = base_ccy
+
     return {"account": account, "positions": positions, "cash": cash, "nav": nav}
 
 
 # Columns that land in the ``positions`` table on the frontend. Keep
 # this list aligned with render logic in app.js (renderPortfolio()).
 # The order here is also the preferred-column order for the widget.
+#
+# Currency note: ``positionValue``, ``costBasisMoney`` and
+# ``fifoPnlUnrealized`` come from IBKR in the *position's* local
+# currency. IBKR provides ``positionValueInBase`` natively but no
+# matching ``costBasisMoneyInBase`` / ``fifoPnlUnrealizedInBase``, so
+# we use ``fxRateToBase`` (also on every OpenPosition row) to convert
+# cost basis and P&L ourselves below. Without this, multi-currency
+# accounts see mixed-currency totals and per-position weights that
+# don't sum to 100%.
 POSITION_FIELDS = [
     ("symbol", "symbol"),
     ("description", "description"),
@@ -283,6 +304,8 @@ POSITION_FIELDS = [
     ("position", "qty"),
     ("markPrice", "mark"),
     ("positionValue", "value"),
+    ("positionValueInBase", "valueInBase"),
+    ("fxRateToBase", "fxRateToBase"),
     ("costBasisPrice", "costPrice"),
     ("costBasisMoney", "costBasis"),
     ("fifoPnlUnrealized", "unrealizedPnl"),
@@ -290,8 +313,9 @@ POSITION_FIELDS = [
 ]
 
 _FLOAT_POSITION_ATTRS = {
-    "position", "markPrice", "positionValue", "costBasisPrice",
-    "costBasisMoney", "fifoPnlUnrealized", "percentOfNAV",
+    "position", "markPrice", "positionValue", "positionValueInBase",
+    "fxRateToBase", "costBasisPrice", "costBasisMoney",
+    "fifoPnlUnrealized", "percentOfNAV",
 }
 
 
@@ -307,11 +331,32 @@ def _parse_positions(root: ET.Element) -> List[Dict[str, Any]]:
                 row[out_key] = _as_float(val)
             else:
                 row[out_key] = val
-        if row:
-            rows.append(row)
-    # Largest positions first so the top of the table is the
-    # user's biggest exposures without the frontend having to sort.
-    rows.sort(key=lambda r: abs(r.get("value") or 0), reverse=True)
+        if not row:
+            continue
+
+        # Derive base-currency value / cost basis / P&L. Prefer IBKR's
+        # native InBase field where present (positionValueInBase); fall
+        # back to local × fxRateToBase. fxRateToBase missing → assume
+        # the position is already in base, matching IBKR's behaviour
+        # for single-currency accounts.
+        fx = row.get("fxRateToBase")
+        if fx is None or fx == 0:
+            fx = 1.0
+        if row.get("valueInBase") is None and row.get("value") is not None:
+            row["valueInBase"] = row["value"] * fx
+        if row.get("costBasis") is not None:
+            row["costBasisInBase"] = row["costBasis"] * fx
+        if row.get("unrealizedPnl") is not None:
+            row["unrealizedPnlInBase"] = row["unrealizedPnl"] * fx
+
+        rows.append(row)
+    # Largest positions first so the top of the table is the user's
+    # biggest exposures. Sort by base-currency value so EUR + USD
+    # positions order correctly.
+    rows.sort(
+        key=lambda r: abs(r.get("valueInBase") or r.get("value") or 0),
+        reverse=True,
+    )
     return rows
 
 

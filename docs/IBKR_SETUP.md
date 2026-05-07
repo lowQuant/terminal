@@ -78,11 +78,19 @@ Powers the positions table.
 | `listingExchange` | Exchange |
 | `position` | Quantity |
 | `markPrice` | Current mark |
-| `positionValue` | Market value (used for sorting) |
+| `positionValue` | Market value (local currency) |
+| `positionValueInBase` | Market value in base currency |
+| `fxRateToBase` | FX rate used to convert cost basis & P&L to base |
 | `costBasisPrice` | Cost per share |
-| `costBasisMoney` | Total cost basis |
-| `fifoPnlUnrealized` | Unrealized P&L (green/red) |
+| `costBasisMoney` | Total cost basis (local currency) |
+| `fifoPnlUnrealized` | Unrealized P&L (local currency) |
 | `percentOfNAV` | Position weight in the portfolio |
+
+> **Multi-currency accounts:** the `positionValueInBase` and
+> `fxRateToBase` fields are what let the terminal show Value / Cost
+> basis / P&L in your base currency and make the weights add up to
+> 100%. Without them, EUR + USD positions are summed as raw numbers
+> and the totals are meaningless.
 
 Set the **Options** flag for this section to: Level of Detail →
 `Summary` (one row per instrument). Lot-level rows aren't used.

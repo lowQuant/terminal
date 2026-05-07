@@ -1897,10 +1897,10 @@ function _fmtQty(v) {
   return v.toLocaleString('en-US', { maximumFractionDigits: 4 });
 }
 
-function _fmtPnlCell(v) {
+function _fmtPnlCell(v, currency = 'USD') {
   if (v == null || !isFinite(v)) return '<td class="col-num">—</td>';
   const cls = v >= 0 ? 'wf-cell--up' : 'wf-cell--down';
-  return `<td class="col-num ${cls}">${_fmtMoney(v)}</td>`;
+  return `<td class="col-num ${cls}">${_fmtMoney(v, currency)}</td>`;
 }
 
 // Exposed globally so auth.js can re-render PORT after the user saves
@@ -1963,8 +1963,8 @@ function _renderPortSetupPrompt() {
       fields: [
         'symbol', 'description', 'assetCategory', 'currency',
         'listingExchange', 'position', 'markPrice', 'positionValue',
-        'costBasisPrice', 'costBasisMoney', 'fifoPnlUnrealized',
-        'percentOfNAV',
+        'positionValueInBase', 'fxRateToBase', 'costBasisPrice',
+        'costBasisMoney', 'fifoPnlUnrealized', 'percentOfNAV',
       ],
     },
     {
@@ -2102,8 +2102,20 @@ function _renderPortSnapshot(body, data) {
   const cash = data.cash || [];
   const nav = data.nav || [];
 
-  const totalValue = positions.reduce((s, p) => s + (p.value || 0), 0);
-  const totalUnreal = positions.reduce((s, p) => s + (p.unrealizedPnl || 0), 0);
+  // Every monetary column on this view is rendered in base currency —
+  // Value, Cost basis, Unrealized P&L. Per-position values arrive with
+  // both local (value, costBasis, unrealizedPnl) and base (*InBase)
+  // variants from the parser; we always pick the InBase one so that a
+  // EUR + USD account totals correctly and weights add to 100%.
+  const baseCcy = account.baseCurrency
+    || (nav.length ? nav[nav.length - 1].currency : null)
+    || 'USD';
+  const baseVal = (p) => p.valueInBase ?? p.value ?? 0;
+  const baseCost = (p) => p.costBasisInBase ?? p.costBasis;
+  const basePnl = (p) => p.unrealizedPnlInBase ?? p.unrealizedPnl;
+
+  const totalValue = positions.reduce((s, p) => s + (baseVal(p) || 0), 0);
+  const totalUnreal = positions.reduce((s, p) => s + (basePnl(p) || 0), 0);
   const baseCash = (cash.find((c) => c.currency === 'BASE_SUMMARY') || {}).endingCash;
   const latestNav = nav.length ? nav[nav.length - 1] : null;
 
@@ -2115,23 +2127,23 @@ function _renderPortSnapshot(body, data) {
         <div style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 2px;">${escHtml(data.asOf || '')}</div>
       </div>
       <div>
-        <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">NAV (base)</div>
-        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;">${_fmtMoney(latestNav?.total)}</div>
+        <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">NAV (${escHtml(baseCcy)})</div>
+        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;">${_fmtMoney(latestNav?.total, baseCcy)}</div>
       </div>
       <div>
         <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Positions value</div>
-        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;">${_fmtMoney(totalValue)}</div>
+        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;">${_fmtMoney(totalValue, baseCcy)}</div>
       </div>
       <div>
         <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Unrealized P&amp;L</div>
         <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;"
              class="${totalUnreal >= 0 ? 'wf-cell--up' : 'wf-cell--down'}">
-          ${_fmtMoney(totalUnreal)}
+          ${_fmtMoney(totalUnreal, baseCcy)}
         </div>
       </div>
       <div>
-        <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Cash (base)</div>
-        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;">${_fmtMoney(baseCash)}</div>
+        <div style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Cash (${escHtml(baseCcy)})</div>
+        <div style="font-size: 1.1rem; font-weight: 600; margin-top: 2px;">${_fmtMoney(baseCash, baseCcy)}</div>
       </div>
     </div>
   `;
@@ -2148,9 +2160,9 @@ function _renderPortSnapshot(body, data) {
             <th style="padding: 8px 10px;">Ccy</th>
             <th class="col-num" style="padding: 8px 10px; text-align: right;">Qty</th>
             <th class="col-num" style="padding: 8px 10px; text-align: right;">Mark</th>
-            <th class="col-num" style="padding: 8px 10px; text-align: right;">Value</th>
-            <th class="col-num" style="padding: 8px 10px; text-align: right;">Cost basis</th>
-            <th class="col-num" style="padding: 8px 10px; text-align: right;">Unrealized</th>
+            <th class="col-num" style="padding: 8px 10px; text-align: right;">Value (${escHtml(baseCcy)})</th>
+            <th class="col-num" style="padding: 8px 10px; text-align: right;">Cost basis (${escHtml(baseCcy)})</th>
+            <th class="col-num" style="padding: 8px 10px; text-align: right;">Unrealized (${escHtml(baseCcy)})</th>
             <th class="col-num" style="padding: 8px 10px; text-align: right;">% NAV</th>
           </tr>
         </thead>
@@ -2163,9 +2175,9 @@ function _renderPortSnapshot(body, data) {
               <td style="padding: 8px 10px;">${escHtml(p.currency || '')}</td>
               <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtQty(p.qty)}</td>
               <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtQty(p.mark)}</td>
-              <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(p.value, p.currency || 'USD')}</td>
-              <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(p.costBasis, p.currency || 'USD')}</td>
-              ${_fmtPnlCell(p.unrealizedPnl)}
+              <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(baseVal(p), baseCcy)}</td>
+              <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(baseCost(p), baseCcy)}</td>
+              ${_fmtPnlCell(basePnl(p), baseCcy)}
               <td class="col-num" style="padding: 8px 10px; text-align: right;">${p.pctOfNav != null ? p.pctOfNav.toFixed(1) + '%' : '—'}</td>
             </tr>
           `).join('')}
@@ -2188,8 +2200,8 @@ function _renderPortSnapshot(body, data) {
         ${cash.map((c) => `
           <tr style="border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.06));">
             <td style="padding: 8px 10px; font-weight: 600;">${escHtml(c.currency || '—')}</td>
-            <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(c.endingCash, c.currency === 'BASE_SUMMARY' ? 'USD' : c.currency)}</td>
-            <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(c.endingSettledCash, c.currency === 'BASE_SUMMARY' ? 'USD' : c.currency)}</td>
+            <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(c.endingCash, c.currency === 'BASE_SUMMARY' ? baseCcy : c.currency)}</td>
+            <td class="col-num" style="padding: 8px 10px; text-align: right;">${_fmtMoney(c.endingSettledCash, c.currency === 'BASE_SUMMARY' ? baseCcy : c.currency)}</td>
           </tr>
         `).join('')}
       </tbody>
