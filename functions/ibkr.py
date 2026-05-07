@@ -170,6 +170,14 @@ def _flex_send_request(token: str, query_id: str) -> str:
         # Translate the most common IBKR error codes to clearer messages.
         # Full list: https://www.interactivebrokers.com/en/software/am/am/reports/flex_web_service_error_codes.htm
         msg_map = {
+            "1001": (
+                "IBKR could not generate the statement right now. This "
+                "usually clears in 1-2 minutes — most often after you've "
+                "just edited and saved the Flex Query (the Web Service "
+                "backend needs a beat to pick up the new revision). "
+                "Wait a moment and retry; if it persists, open the query "
+                "in IBKR and click Save again."
+            ),
             "1003": "Statement is not yet available — try again in a moment.",
             "1004": "Invalid request format.",
             "1005": "Invalid Flex token — regenerate it in Account Management.",
