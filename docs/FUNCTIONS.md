@@ -157,6 +157,24 @@ Market-cap floor prevents microcap noise.
 | **WF tool** | ✅ `MOST` — params: `country`, `view`, `limit` |
 | **Filters** | Country, view (gainers/losers/active/premarket), currency, column filters (market cap, change%, rel. volume) |
 
+### `WEIF` — World Equity Futures
+
+Single-screen snapshot of major global equity index futures (S&P 500,
+Nasdaq 100, Dow, Russell 2000, Nikkei) plus benchmark spot indices for
+EMEA and Asia/Pacific where a liquid Yahoo-listed future isn't
+available. Grouped by region (Americas, EMEA, Asia/Pacific) and
+refreshed every 60s. Useful as an overnight risk-on / risk-off read
+before the cash open.
+
+| Property | Value |
+|---|---|
+| **Type** | Market-level (function hero header) |
+| **Data source** | yfinance `fast_info` (parallel batch fetch) |
+| **Backend** | `functions/weif.py` — `/api/weif?region=...` |
+| **Currency** | ❌ (each row shows its native currency code) |
+| **WF tool** | ✅ `WEIF` — params: `region`, `limit` |
+| **Filters** | Region pill (All / Americas / EMEA / Asia/Pacific) |
+
 ### `MOV` — Index Movers
 
 Which index constituents are driving the index up or down, ranked by
@@ -283,7 +301,6 @@ Shown in autocomplete with a grey `SOON` badge:
 | Code | Name | Status |
 |---|---|---|
 | `CMDTY` | Commodity Overview | Not started — needs a data source (TV scanner can query commodities) |
-| `WEIF` | World Equity Futures | Not started |
 
 ---
 
@@ -420,6 +437,7 @@ functions/
 ├── eqs.py                       # EQS: markets, fields, scan endpoints
 ├── most.py                      # MOST: gainers / losers / active / premarket
 ├── mov.py                       # MOV: index constituent attribution
+├── weif.py                      # WEIF: global equity index futures snapshot
 ├── omon.py                      # OMON + IVOL: options chain + volatility smile
 ├── fx.py                        # FX service: ECB rates, conversion endpoints
 ├── watchlist.py                 # W: batch quotes, relative volume, earnings proximity

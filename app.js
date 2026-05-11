@@ -597,10 +597,10 @@ const FUNCTIONS = [
     name: 'World Equity Futures',
     desc: 'Global index futures',
     aliases: ['WEIF', 'FUTURES'],
-    implemented: false,
-    category: 'soon',
-    longDesc: 'World Equity Futures — global index futures. Not started yet.',
-    related: [],
+    implemented: true,
+    category: 'market',
+    longDesc: 'World Equity Futures — snapshot of major global equity index futures (S&P, Nasdaq, Dow, Russell, Nikkei) and benchmark spot indices across Americas, EMEA, and Asia/Pacific. Useful as an overnight risk-on/risk-off read.',
+    related: ['MOV', 'MOST', 'ECO'],
   },
 ];
 
@@ -702,6 +702,7 @@ function openFunction(code) {
     case 'EVTS': renderEventsCalendar(dashboard); break;
     case 'MOST': renderMostActive(dashboard); break;
     case 'MOV':  renderIndexMovers(dashboard); break;
+    case 'WEIF': renderWorldEquityFutures(dashboard); break;
     case 'EQS':  renderEquityScreener(dashboard); break;
     case 'OMON': renderOMON(dashboard); break;
     case 'IVOL': renderIVOL(dashboard); break;
@@ -3323,6 +3324,194 @@ function renderMovTable() {
     `;
   });
   html += `</div>`;
+  container.innerHTML = html;
+}
+
+
+// ═══════════════════════════════════════
+// WEIF — World Equity Futures
+// ═══════════════════════════════════════
+
+const weifState = {
+  region: '',              // '' = all
+  autoRefresh: true,
+};
+
+const WEIF_REGIONS = [
+  { key: '',              label: 'All' },
+  { key: 'Americas',      label: 'Americas' },
+  { key: 'EMEA',          label: 'EMEA' },
+  { key: 'Asia/Pacific',  label: 'Asia/Pacific' },
+];
+
+let _weifData = null;
+let _weifTimer = null;
+
+function renderWorldEquityFutures(container) {
+  container.className = 'dashboard dashboard--function';
+  container.innerHTML = `
+    <div class="function-wrapper">
+      <header class="function-header">
+        <div class="function-header__title-row">
+          <div class="function-header__code">WEIF</div>
+          <div class="function-header__name">
+            <div class="function-header__name-main">World Equity Futures</div>
+            <div class="function-header__name-sub" id="weif-subtitle">Global index futures &amp; benchmark indices</div>
+          </div>
+        </div>
+      </header>
+
+      <div class="function-toolbar">
+        <div class="function-toolbar__label">Region</div>
+        <div class="range-filter" id="weif-region-filter">
+          ${WEIF_REGIONS.map((r) =>
+            `<button class="country-btn ${r.key === weifState.region ? 'country-btn--active' : ''}" data-region="${escHtml(r.key)}">${escHtml(r.label)}</button>`
+          ).join('')}
+        </div>
+
+        <button class="filter-toggle" id="weif-refresh-btn" style="margin-left:auto" title="Refresh">
+          <span class="filter-toggle__icon">&#8634;</span> Refresh
+        </button>
+      </div>
+
+      <div class="panel function-panel">
+        <div class="panel__body" id="weif-table-container">
+          <div class="evts-loading">
+            <div class="search-loading__spinner"></div>
+            <span>Loading world equity futures…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  $$('#weif-region-filter .country-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('#weif-region-filter .country-btn').forEach((b) => b.classList.remove('country-btn--active'));
+      btn.classList.add('country-btn--active');
+      weifState.region = btn.dataset.region || '';
+      renderWeifTable();
+    });
+  });
+
+  $('#weif-refresh-btn')?.addEventListener('click', () => loadWeifData());
+
+  // Tear down any previous timer before installing a new one
+  if (_weifTimer) { clearInterval(_weifTimer); _weifTimer = null; }
+  _weifTimer = setInterval(() => {
+    // Stop refreshing if the user navigated away
+    if (state.activeFunction !== 'WEIF') {
+      clearInterval(_weifTimer);
+      _weifTimer = null;
+      return;
+    }
+    loadWeifData({ silent: true });
+  }, 60_000);
+
+  loadWeifData();
+}
+
+async function loadWeifData(opts = {}) {
+  const container = $('#weif-table-container');
+  if (!container) return;
+  if (!opts.silent) {
+    container.innerHTML = `
+      <div class="evts-loading">
+        <div class="search-loading__spinner"></div>
+        <span>Loading world equity futures…</span>
+      </div>
+    `;
+  }
+  try {
+    const resp = await fetch('/api/weif');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    if (payload.error) throw new Error(payload.error);
+    _weifData = payload.rows || [];
+    setDataSource(payload.source || 'Yahoo Finance');
+    const sub = $('#weif-subtitle');
+    if (sub) sub.textContent = `${_weifData.length} contracts · updated ${new Date().toLocaleTimeString()}`;
+    renderWeifTable();
+  } catch (err) {
+    console.error('Failed to load WEIF data:', err);
+    container.innerHTML = `
+      <div class="evts-empty">
+        <div class="evts-empty__icon">⚠</div>
+        <div>Could not load world equity futures.</div>
+        <div class="text-muted" style="font-size:11px;margin-top:8px;">${escHtml(err.message)}</div>
+      </div>
+    `;
+  }
+}
+
+function renderWeifTable() {
+  const container = $('#weif-table-container');
+  if (!container || !_weifData) return;
+
+  const filtered = weifState.region
+    ? _weifData.filter((r) => r.region === weifState.region)
+    : _weifData;
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div class="evts-empty"><div class="evts-empty__icon">🌐</div><div>No instruments for this region.</div></div>`;
+    return;
+  }
+
+  // Group by region, preserving the order from the API
+  const groups = new Map();
+  filtered.forEach((row) => {
+    const key = row.region || 'Other';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+
+  let html = '';
+  groups.forEach((rows, region) => {
+    html += `
+      <div class="weif-region-header" style="padding:8px 12px;margin-top:8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#888);font-weight:600;">
+        ${escHtml(region)}
+      </div>
+      <div class="most-table">
+        <div class="most-table__header">
+          <div>Symbol</div>
+          <div>Description</div>
+          <div>Type</div>
+          <div class="most-table__num">Last</div>
+          <div class="most-table__num">Change</div>
+          <div class="most-table__num">Change %</div>
+          <div class="most-table__num">High</div>
+          <div class="most-table__num">Low</div>
+          <div class="most-table__num">Volume</div>
+        </div>
+    `;
+
+    rows.forEach((r) => {
+      const chgClass = r.change != null ? (r.change >= 0 ? 'most-table__positive' : 'most-table__negative') : '';
+      const pctClass = r.change_pct != null ? (r.change_pct >= 0 ? 'most-table__positive' : 'most-table__negative') : '';
+      const fmtNum = (v, d = 2) => (v == null ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
+      const fmtPct = (v) => (v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%');
+      const fmtChg = (v) => (v == null ? '—' : (v >= 0 ? '+' : '') + fmtNum(v, 2));
+
+      const typeLabel = r.kind ? `${r.kind}${r.currency ? ' · ' + r.currency : ''}` : '';
+
+      html += `
+        <div class="most-table__row" onclick="searchAndLoad('${escHtml(r.symbol)}')">
+          <div class="most-table__ticker">${escHtml(r.symbol)}</div>
+          <div class="most-table__name">${escHtml(r.name || '')}</div>
+          <div class="most-table__sector">${escHtml(typeLabel)}</div>
+          <div class="most-table__num">${fmtNum(r.last, 2)}</div>
+          <div class="most-table__num ${chgClass}">${fmtChg(r.change)}</div>
+          <div class="most-table__num ${pctClass}">${fmtPct(r.change_pct)}</div>
+          <div class="most-table__num">${fmtNum(r.day_high, 2)}</div>
+          <div class="most-table__num">${fmtNum(r.day_low, 2)}</div>
+          <div class="most-table__num">${r.volume != null ? fmtBigNum(r.volume) : '—'}</div>
+        </div>
+      `;
+    });
+
+    html += `</div>`;
+  });
+
   container.innerHTML = html;
 }
 
