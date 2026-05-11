@@ -23,6 +23,7 @@ from functions.eqs import eqs_bp
 from functions.omon import omon_bp
 from functions.vcone import vcone_bp
 from functions.watchlist import watchlist_bp
+from functions.weif import weif_bp
 from functions.workflow import wf_bp
 from functions._countries import COUNTRIES, all_with_eco, all_with_scanner, to_json
 
@@ -62,6 +63,7 @@ ALL_BLUEPRINTS = [
     omon_bp,
     vcone_bp,
     watchlist_bp,
+    weif_bp,
     wf_bp,
 ]
 

@@ -607,6 +607,82 @@ def wf_mov(index: str = "SPX", sort: str = "contribution",
 
 
 # ═══════════════════════════════════════════════════════════════════
+# WEIF — World Equity Futures
+# ═══════════════════════════════════════════════════════════════════
+
+@register_tool(
+    name="WEIF",
+    description=(
+        "World Equity Futures — snapshot of major global equity index "
+        "futures (S&P, Nasdaq, Dow, Russell, Nikkei) and benchmark spot "
+        "indices across Americas, EMEA, and Asia/Pacific. Use this for "
+        "an overnight risk-on / risk-off read before the cash open."
+    ),
+    params_schema={
+        "region": {
+            "type": "string",
+            "description": "Optional region filter: Americas, EMEA, Asia/Pacific.",
+            "enum": ["", "Americas", "EMEA", "Asia/Pacific"],
+            "default": "",
+        },
+        "limit": {"type": "integer", "default": 30},
+    },
+    category="market",
+)
+def wf_weif(region: str = "", limit: int = 30) -> FunctionResult:
+    path = "/api/weif"
+    if region:
+        from urllib.parse import quote
+        path += f"?region={quote(region)}"
+    payload = _flask_get_json(path)
+    if isinstance(payload, dict) and "error" in payload:
+        return FunctionResult(
+            error=payload["error"],
+            summary=f"WEIF failed: {payload['error']}",
+        )
+
+    rows = _rows(payload)
+    limit = max(1, min(int(limit), 60))
+    rows = rows[:limit]
+
+    # Pick out a few headline movers for the summary blurb.
+    headline_codes = {"ES=F", "NQ=F", "YM=F", "^STOXX50E", "^GDAXI", "^FTSE", "^N225", "^HSI"}
+    headlines = [r for r in rows if r.get("symbol") in headline_codes]
+    if not headlines:
+        headlines = rows[:6]
+
+    def fmt(r):
+        sym = r.get("symbol", "?")
+        pct = r.get("change_pct")
+        if pct is None:
+            return f"{sym} n/a"
+        return f"{sym} {pct:+.2f}%"
+
+    scope = region or "Global"
+    summary = f"{scope} futures: " + ", ".join(fmt(r) for r in headlines[:6])
+
+    return FunctionResult(
+        data={"rows": rows, "region": region or "All"},
+        summary=summary,
+        widget={
+            "type": "table",
+            "title": f"World Equity Futures{' — ' + region if region else ''}",
+            "columns": [
+                {"key": "symbol",     "label": "Symbol"},
+                {"key": "name",       "label": "Description"},
+                {"key": "region",     "label": "Region"},
+                {"key": "kind",       "label": "Type"},
+                {"key": "last",       "label": "Last"},
+                {"key": "change",     "label": "Change"},
+                {"key": "change_pct", "label": "Change %"},
+                {"key": "currency",   "label": "Ccy"},
+            ],
+            "rows": rows,
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
 # FA — Financial Analysis
 #
 # Bloomberg's ``FA`` is the financial statements + ratio function.
